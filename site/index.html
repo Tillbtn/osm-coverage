@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OSM-ALKIS Adressen Vergleich - Niedersachsen</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+</head>
+
+<body>
+    <div id="container">
+        <header>
+            <h1>OSM-ALKIS Adressen Vergleich (Niedersachsen)</h1>
+            <div id="stats">
+                Lädt Statistiken...
+            </div>
+            <select id="districtSelect">
+                <option value="Global">Gesamtes Niedersachsen</option>
+            </select>
+        </header>
+        <div id="map"></div>
+        <div id="history-container" style="display:none; padding: 20px; background: white; height: 300px;">
+            <canvas id="historyChart"></canvas>
+        </div>
+        <div id="controls"
+            style="position: absolute; bottom: 20px; left: 20px; z-index: 1000; background: white; padding: 10px; border-radius: 5px;">
+            <button onclick="toggleHistory()">Verlauf anzeigen</button>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="app.js"></script>
+</body>
+
+</html>
