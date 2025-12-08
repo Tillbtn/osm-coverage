@@ -1,0 +1,12 @@
+geopandas
+requests
+shapely
+tqdm
+fiona
+rtree
+pyproj
+pandas
+pyarrow
+mercantile
+mapbox_vector_tile
+protobuf
