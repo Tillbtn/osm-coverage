@@ -44,10 +44,17 @@ def fetch_osm_addresses(bbox, name):
             lat = el.get('lat') or el.get('center', {}).get('lat')
             lon = el.get('lon') or el.get('center', {}).get('lon')
             
-            if lat and lon and 'addr:housenumber' in tags and 'addr:street' in tags:
+            street = tags.get('addr:street')
+            place = tags.get('addr:place')
+            hnr = tags.get('addr:housenumber')
+            
+            # Use street if available, otherwise place
+            street_val = street if street else place
+            
+            if lat and lon and hnr and street_val:
                 records.append({
-                    'street': tags['addr:street'],
-                    'housenumber': tags['addr:housenumber'],
+                    'street': street_val,
+                    'housenumber': hnr,
                     'postcode': tags.get('addr:postcode', ''),
                     'city': tags.get('addr:city', ''),
                     'lat': lat,
