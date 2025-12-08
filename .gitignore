@@ -1,0 +1,11 @@
+# Python
+.venv
+
+# Data
+data/
+temp_alkis/
+site/districts
+site/tiles
+
+*.json
+*.geojson
