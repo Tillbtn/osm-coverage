@@ -1,6 +1,11 @@
 
 // State
+// State
 let currentLayer = null;
+let districtsData = [];
+let sortCol = 'name';
+let sortAsc = true;
+let chartInstance = null;
 
 // Init Map
 const map = L.map('map').setView([52.9, 9.8], 8); // Niedersachsen view
@@ -15,6 +20,8 @@ Promise.all([
     fetch('districts.json').then(r => r.json()),
     fetch('history.json').then(r => r.ok ? r.json() : [])
 ]).then(([districts, history]) => {
+    districtsData = districts;
+
     // Populate Select
     const select = document.getElementById('districtSelect');
     districts.forEach(d => {
@@ -34,6 +41,9 @@ Promise.all([
     if (history.length > 0) {
         initChart(history);
     }
+
+    // Initial Stats Render
+    renderStatsTable();
 });
 
 document.getElementById('districtSelect').addEventListener('change', (e) => {
@@ -107,7 +117,7 @@ function loadDistrict(name) {
 
 function initChart(history) {
     const ctx = document.getElementById('historyChart').getContext('2d');
-    new Chart(ctx, {
+    chartInstance = new Chart(ctx, {
         type: 'line',
         data: {
             labels: history.map(h => h.date),
@@ -117,12 +127,83 @@ function initChart(history) {
                 borderColor: 'rgb(75, 192, 192)',
                 tension: 0.1
             }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            responsive: true
         }
     });
 }
 
-function toggleHistory() {
-    const el = document.getElementById('history-container');
-    el.style.display = el.style.display === 'none' ? 'block' : 'none';
-    setTimeout(() => map.invalidateSize(), 100);
+function toggleStats() {
+    const modal = document.getElementById('stats-modal');
+    const isShowing = modal.style.display === 'block';
+    modal.style.display = isShowing ? 'none' : 'block';
+
+    if (!isShowing && chartInstance) {
+        // We just opened it
+        setTimeout(() => {
+            chartInstance.resize();
+        }, 100);
+    }
+}
+
+function renderStatsTable() {
+    const tbody = document.querySelector('#statsTable tbody');
+    tbody.innerHTML = '';
+
+    const sortedData = [...districtsData].sort((a, b) => {
+        let valA = a[sortCol];
+        let valB = b[sortCol];
+
+        if (typeof valA === 'string') valA = valA.toLowerCase();
+        if (typeof valB === 'string') valB = valB.toLowerCase();
+
+        if (valA < valB) return sortAsc ? -1 : 1;
+        if (valA > valB) return sortAsc ? 1 : -1;
+        return 0;
+    });
+
+    sortedData.forEach(d => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${d.name}</td>
+            <td>${d.total}</td>
+            <td>${d.missing}</td>
+            <td>${d.coverage}%</td>
+        `;
+        tr.onclick = () => {
+            // Optional: Click row to load district
+            document.getElementById('districtSelect').value = d.name;
+            loadDistrict(d.name);
+            toggleStats(); // Close modal on selection
+        };
+        tr.style.cursor = 'pointer';
+        tbody.appendChild(tr);
+    });
+
+    // Update header arrow indicators if desired (simple version)
+    document.querySelectorAll('#statsTable th').forEach(th => {
+        if (th.textContent.includes('↕')) {
+            // Reset
+        }
+    });
+}
+
+function sortStats(col) {
+    if (sortCol === col) {
+        sortAsc = !sortAsc;
+    } else {
+        sortCol = col;
+        sortAsc = true;
+    }
+    renderStatsTable();
+}
+
+// Close modal when clicking outside
+window.onclick = function (event) {
+    const modal = document.getElementById('stats-modal');
+    if (event.target == modal) {
+        modal.style.display = "none";
+    }
 }
