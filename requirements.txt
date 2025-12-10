@@ -10,3 +10,4 @@ pyarrow
 mercantile
 mapbox_vector_tile
 protobuf
+osmium

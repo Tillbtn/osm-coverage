@@ -100,27 +100,41 @@ def main():
     missing = alkis[~alkis['found_in_osm']]
     print(f"Total Missing: {len(missing)} / {len(alkis)}")
     
-    # History Tracking
+    # History Tracking Structure
+    DETAILED_HISTORY_FILE = os.path.join(OUTPUT_DIR, "detailed_history.json")
+    
+    # Load existing history
+    history_store = {"global": [], "districts": {}}
+    if os.path.exists(DETAILED_HISTORY_FILE):
+        try:
+            with open(DETAILED_HISTORY_FILE, 'r') as f:
+                history_store = json.load(f)
+                if "districts" not in history_store: history_store["districts"] = {}
+        except:
+            pass # corrupted or old format
+            
     today = datetime.datetime.now().strftime("%Y-%m-%d")
-    history_entry = {
+    
+    # Global Stat
+    global_stat = {
         "date": today,
-        "alkis_count": len(alkis),
-        "osm_count": len(osm),
-        "missing_count": len(missing),
-        "coverage_percent": round((len(alkis) - len(missing)) / len(alkis) * 100, 2)
+        "alkis": len(alkis),
+        "osm": len(osm),
+        "missing": len(missing),
+        "coverage": round((len(alkis) - len(missing)) / len(alkis) * 100, 2)
     }
     
-    history_data = []
-    if os.path.exists(HISTORY_FILE):
-        with open(HISTORY_FILE, 'r') as f:
-            history_data = json.load(f)
-    
-    # Check if duplicate date
-    if not history_data or history_data[-1]['date'] != today:
-        history_data.append(history_entry)
-        with open(HISTORY_FILE, 'w') as f:
-            json.dump(history_data, f, indent=2)
-    
+    # Update global (avoid dupes for today)
+    # Check last entry
+    if not history_store["global"] or history_store["global"][-1]["date"] != today:
+        history_store["global"].append(global_stat)
+    else:
+        history_store["global"][-1] = global_stat
+
+    # Keep legacy history.json for compatibility for now (optional)
+    with open(HISTORY_FILE, 'w') as f:
+        json.dump(history_store["global"], f, indent=2)
+
     # Group by District
     os.makedirs(STATS_DIR, exist_ok=True)
     
@@ -128,6 +142,62 @@ def main():
     if 'district' not in alkis.columns:
         print("Warning: No 'district' column in ALKIS data. Saving global diff only.")
         alkis['district'] = 'Global'
+        
+    districts = alkis['district'].unique()
+    district_list = []
+    
+    for district in districts:
+        print(f"Processing {district}...")
+        district_alkis = alkis[alkis['district'] == district]
+        district_missing = district_alkis[~district_alkis['found_in_osm']]
+        
+        # Stats
+        d_stats = {
+            "name": district,
+            "total": len(district_alkis),
+            "missing": len(district_missing),
+            "coverage": round((len(district_alkis) - len(district_missing)) / len(district_alkis) * 100, 1)
+        }
+        district_list.append(d_stats)
+        
+        # Update District History
+        d_hist_entry = {
+            "date": today,
+            "total": d_stats["total"],
+            "missing": d_stats["missing"],
+            "coverage": d_stats["coverage"]
+        }
+        
+        if district not in history_store["districts"]:
+            history_store["districts"][district] = []
+            
+        d_hist = history_store["districts"][district]
+        if not d_hist or d_hist[-1]["date"] != today:
+            d_hist.append(d_hist_entry)
+        else:
+            d_hist[-1] = d_hist_entry
+        
+        # Export GeoJSON
+        export_cols = ['street', 'housenumber', 'geometry']
+        missing_export = district_missing[export_cols]
+        
+        if missing_export.crs != "EPSG:4326":
+            missing_export = missing_export.to_crs("EPSG:4326")
+            
+        out_path = os.path.join(STATS_DIR, f"{district}.geojson")
+        if len(missing_export) > 0:
+            try:
+                missing_export.to_file(out_path, driver="GeoJSON")
+            except Exception as e:
+                print(f"Error saving {district}: {e}")
+        else:
+            # Create empty feature collection
+            with open(out_path, 'w') as f:
+                json.dump({"type": "FeatureCollection", "features": []}, f)
+                
+    # Save Detailed History
+    with open(DETAILED_HISTORY_FILE, 'w') as f:
+        json.dump(history_store, f, indent=2)
         
     districts = alkis['district'].unique()
     district_list = []
