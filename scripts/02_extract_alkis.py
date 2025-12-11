@@ -118,10 +118,10 @@ def main():
         base = os.path.basename(zip_file)
         parts = base.split('_')
         if len(parts) >= 4:
-            district_name = parts[2] # Adjust index based on actual filenames
-            # If name has spaces or multiple parts? Usually joined by underscore in these files
-            # Let's clean it up slightly if needed, but 'Peine', 'Harburg' seem simple.
-            # Example: lkr_03252_Hameln-Pyrmont_kon.gpkg.zip
+            if len(parts) == 4:
+                district_name = parts[2]
+            elif len(parts) == 5:
+                district_name = f"{parts[2]}_{parts[3]}"
         else:
             district_name = base
             

@@ -55,9 +55,7 @@ class AddressHandler(osmium.SimpleHandler):
 
     def way(self, w):
         try:
-             # Ways are LineStrings in PBF terms. 
-             # We can check if closed? 
-             # For address purposes, we just need the geometry to get a centroid.
+             # Ways are LineStrings in PBF terms
              self.process_object(w, lambda x: self.wkbfab.create_linestring(x))
         except:
              pass
@@ -69,9 +67,6 @@ class AddressHandler(osmium.SimpleHandler):
              pass
 
 def download_pbf():
-    if os.path.exists(PBF_FILE):
-        print(f"PBF file exists: {PBF_FILE}")
-        return
 
     print(f"Downloading {PBF_URL}...")
     with requests.get(PBF_URL, stream=True) as r:
@@ -88,7 +83,7 @@ def main():
     os.makedirs(DATA_DIR, exist_ok=True)
     download_pbf()
     
-    print("Extracting addresses from PBF (this WILL take a few minutes)...")
+    print("Extracting addresses from PBF (this will take a few minutes)...")
     handler = AddressHandler()
     
     try:
@@ -130,7 +125,7 @@ def main():
     gdf.drop_duplicates(subset=['street', 'housenumber', 'lat', 'lon'], inplace=True)
     gdf.drop(columns=['lat', 'lon'], inplace=True)
     
-    print(f"Total Unique OSM Addresses: {len(gdf)}")
+    print(f"Total unique OSM addresses: {len(gdf)}")
     
     gdf.to_parquet(OUTPUT_FILE)
     print(f"Saved to {OUTPUT_FILE}")

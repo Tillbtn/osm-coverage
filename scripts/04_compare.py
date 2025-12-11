@@ -5,14 +5,16 @@ from shapely.geometry import Point
 import os
 import json
 import datetime
+import osmium
 
 # Configuration
 DATA_DIR = "data"
 ALKIS_FILE = os.path.join(DATA_DIR, "alkis_addresses.parquet")
 OSM_FILE = os.path.join(DATA_DIR, "osm_addresses.parquet")
+PBF_FILE = os.path.join(DATA_DIR, "niedersachsen-latest.osm.pbf")
 OUTPUT_DIR = "site"
-STATS_DIR = os.path.join(OUTPUT_DIR, "districts") # New structure
-HISTORY_FILE = os.path.join(OUTPUT_DIR, "history.json")
+STATS_DIR = os.path.join(OUTPUT_DIR, "districts")
+DETAILED_HISTORY_FILE = os.path.join(OUTPUT_DIR, "detailed_history.json")
 
 def normalize_street(name):
     if not isinstance(name, str):
@@ -28,11 +30,11 @@ def normalize_street(name):
 def normalize_hnr(hnr):
     if not isinstance(hnr, str):
         return str(hnr).lower()
-    return hnr.lower().strip()
+    return hnr.lower().strip().replace(" ", "")
 
 def main():
     if not os.path.exists(ALKIS_FILE) or not os.path.exists(OSM_FILE):
-        print("Data files not found. Run extract steps first.")
+        print("Data files not found")
         return
 
     print("Loading datasets...")
@@ -59,7 +61,7 @@ def main():
     osm = osm.to_crs(epsg=25832)
     
     # Prepare for merge
-    # We need to track ALKIS indices to mark them as found later
+    # track ALKIS indices to mark them as found later
     alkis['alkis_idx'] = alkis.index
     
     # Merge on Address Key
@@ -81,10 +83,8 @@ def main():
     # Converting back to GeoSeries to be sure, although merge output usually has objects
     distances =  gpd.GeoSeries(merged['geometry_alkis']).distance(gpd.GeoSeries(merged['geometry_osm']))
     
-    # Filter spatial validity (1000m threshold)
-    # 2km is very safe for different villages, usually <500m is enough for "same town error"
-    # But let's stick to 1000m (1km) as a robust middle ground.
-    valid_matches = merged[distances < 1000]
+    # Filter spatial validity (50m threshold)
+    valid_matches = merged[distances < 50]
     
     # Identify found ALKIS IDs
     found_indices = set(valid_matches['alkis_idx'].unique())
@@ -100,9 +100,7 @@ def main():
     missing = alkis[~alkis['found_in_osm']]
     print(f"Total Missing: {len(missing)} / {len(alkis)}")
     
-    # History Tracking Structure
-    DETAILED_HISTORY_FILE = os.path.join(OUTPUT_DIR, "detailed_history.json")
-    
+    # History Tracking
     # Load existing history
     history_store = {"global": [], "districts": {}}
     if os.path.exists(DETAILED_HISTORY_FILE):
@@ -112,12 +110,15 @@ def main():
                 if "districts" not in history_store: history_store["districts"] = {}
         except:
             pass # corrupted or old format
-            
-    today = datetime.datetime.now().strftime("%Y-%m-%d")
+
+    # get the snaphot date
+    reader = osmium.io.Reader(PBF_FILE)
+    export_date = reader.header().get("osmosis_replication_timestamp")
+    print(f"OSM Snapshot Timestamp: {export_date}")
     
     # Global Stat
     global_stat = {
-        "date": today,
+        "date": export_date,
         "alkis": len(alkis),
         "osm": len(osm),
         "missing": len(missing),
@@ -126,14 +127,10 @@ def main():
     
     # Update global (avoid dupes for today)
     # Check last entry
-    if not history_store["global"] or history_store["global"][-1]["date"] != today:
+    if not history_store["global"] or history_store["global"][-1]["date"] != export_date:
         history_store["global"].append(global_stat)
     else:
         history_store["global"][-1] = global_stat
-
-    # Keep legacy history.json for compatibility for now (optional)
-    with open(HISTORY_FILE, 'w') as f:
-        json.dump(history_store["global"], f, indent=2)
 
     # Group by District
     os.makedirs(STATS_DIR, exist_ok=True)
@@ -162,7 +159,7 @@ def main():
         
         # Update District History
         d_hist_entry = {
-            "date": today,
+            "date": export_date,
             "total": d_stats["total"],
             "missing": d_stats["missing"],
             "coverage": d_stats["coverage"]
@@ -172,7 +169,7 @@ def main():
             history_store["districts"][district] = []
             
         d_hist = history_store["districts"][district]
-        if not d_hist or d_hist[-1]["date"] != today:
+        if not d_hist or d_hist[-1]["date"] != export_date:
             d_hist.append(d_hist_entry)
         else:
             d_hist[-1] = d_hist_entry
@@ -199,41 +196,6 @@ def main():
     with open(DETAILED_HISTORY_FILE, 'w') as f:
         json.dump(history_store, f, indent=2)
         
-    districts = alkis['district'].unique()
-    district_list = []
-    
-    for district in districts:
-        print(f"Processing {district}...")
-        district_alkis = alkis[alkis['district'] == district]
-        district_missing = district_alkis[~district_alkis['found_in_osm']]
-        
-        # Stats
-        d_stats = {
-            "name": district,
-            "total": len(district_alkis),
-            "missing": len(district_missing),
-            "coverage": round((len(district_alkis) - len(district_missing)) / len(district_alkis) * 100, 1)
-        }
-        district_list.append(d_stats)
-        
-        # Export GeoJSON
-        export_cols = ['street', 'housenumber', 'geometry']
-        missing_export = district_missing[export_cols]
-        
-        if missing_export.crs != "EPSG:4326":
-            missing_export = missing_export.to_crs("EPSG:4326")
-            
-        out_path = os.path.join(STATS_DIR, f"{district}.geojson")
-        if len(missing_export) > 0:
-            try:
-                missing_export.to_file(out_path, driver="GeoJSON")
-            except Exception as e:
-                print(f"Error saving {district}: {e}")
-        else:
-            # Create empty feature collection
-            with open(out_path, 'w') as f:
-                json.dump({"type": "FeatureCollection", "features": []}, f)
-
     # Save list of districts for frontend selector
     district_list.sort(key=lambda x: x['name'])
     with open(os.path.join(OUTPUT_DIR, "districts.json"), 'w') as f:
