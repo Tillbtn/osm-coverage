@@ -7,6 +7,8 @@ import pandas as pd
 import geopandas as gpd
 from shapely import wkb
 import tqdm
+from email.utils import parsedate_to_datetime
+from datetime import datetime, timezone
 
 # Configuration
 DATA_DIR = "data"
@@ -67,6 +69,26 @@ class AddressHandler(osmium.SimpleHandler):
              pass
 
 def download_pbf():
+    print(f"Checking {PBF_URL}...")
+    try:
+        # Check remote file timestamp
+        head_response = requests.head(PBF_URL)
+        head_response.raise_for_status()
+        last_modified = head_response.headers.get("Last-Modified")
+
+        if last_modified and os.path.exists(PBF_FILE):
+            remote_time = parsedate_to_datetime(last_modified)
+            # Ensure local time is timezone-aware (UTC) for comparison
+            local_time = datetime.fromtimestamp(os.path.getmtime(PBF_FILE), tz=timezone.utc)
+            
+            print(f"Remote: {remote_time}, Local: {local_time}")
+            
+            if remote_time <= local_time:
+                print("Local file is newer or same age as remote. Skipping download.")
+                return
+
+    except Exception as e:
+        print(f"Warning: Could not check timestamp: {e}. Proceeding with download attempt.")
 
     print(f"Downloading {PBF_URL}...")
     with requests.get(PBF_URL, stream=True) as r:
