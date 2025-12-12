@@ -27,7 +27,7 @@ Promise.all([
         districts.forEach(d => {
             const opt = document.createElement('option');
             opt.value = d.name;
-            opt.textContent = `${d.name} (${d.coverage}%)`;
+            opt.textContent = `${d.name.replace(/_/g, ' ')} (${d.coverage}%)`;
             select.appendChild(opt);
         });
 
@@ -69,7 +69,7 @@ function loadDistrict(name) {
         if (districtsData && districtsData.length > 0) {
             totalMissing = districtsData.reduce((sum, d) => sum + (d.missing || 0), 0);
         }
-        document.getElementById('stats').innerText = `${totalMissing} fehlende Adressen`;
+        document.getElementById('stats').innerText = `gesamt: ${totalMissing} fehlende Adressen`;
         map.setView([52.9, 9.8], 8);
         return;
     }

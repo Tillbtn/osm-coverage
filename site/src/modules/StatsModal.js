@@ -1,5 +1,5 @@
 
-import { initHistoryChart, updateChart, initComparisonChart, renderHistoryTable } from './ui.js';
+import { initHistoryChart, updateChart, updateComparisonChart, renderHistoryTable } from './ui.js';
 
 export class StatsModal {
     constructor(districtsData, historyData, onSelectDistrict) {
@@ -57,7 +57,13 @@ export class StatsModal {
                 </div>
 
                 <div id="comparisonChartSection" class="stats-section">
-                    <h3>Vergleich aller Landkreise</h3>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <h3>Vergleich aller Landkreise</h3>
+                        <select id="compChartMode" style="padding: 5px;">
+                            <option value="top7">7 Tage</option>
+                            <option value="top30">30 Tage</option>
+                        </select>
+                    </div>
                     <div class="chart-container" style="height: 400px;">
                         <canvas id="comparisonChart"></canvas>
                     </div>
@@ -87,6 +93,7 @@ export class StatsModal {
 
         this.modalElement = document.getElementById('stats-modal');
         this.statsSelect = document.getElementById('statsChartSelect');
+        this.compModeSelect = document.getElementById('compChartMode');
     }
 
     attachEvents() {
@@ -108,7 +115,7 @@ export class StatsModal {
             this.districtsData.forEach(d => {
                 const opt = document.createElement('option');
                 opt.value = d.name;
-                opt.textContent = d.name;
+                opt.textContent = d.name.replace(/_/g, ' ');
                 this.statsSelect.appendChild(opt);
             });
         }
@@ -116,7 +123,20 @@ export class StatsModal {
         this.statsSelect.addEventListener('change', (e) => {
             const dataset = updateChart(e.target.value, this.historyData);
             renderHistoryTable(dataset, '#historyTable tbody');
+
+            // Toggle Comparison Section visibility based on Global selection
+            const isGlobal = (e.target.value === "global");
+            const compSection = document.getElementById('comparisonChartSection');
+            if (compSection) compSection.style.display = isGlobal ? 'block' : 'none';
         });
+
+        // Comparison Chart Mode Select
+        if (this.compModeSelect) {
+            this.compModeSelect.addEventListener('change', (e) => {
+                const ctx = document.getElementById('comparisonChart').getContext('2d');
+                updateComparisonChart(ctx, this.historyData, e.target.value);
+            });
+        }
 
         // Table headers for sorting
         const headers = this.modalElement.querySelectorAll('#statsTable th[data-sort]');
@@ -134,7 +154,8 @@ export class StatsModal {
             initHistoryChart(historyCtx, this.historyData);
 
             const compCtx = document.getElementById('comparisonChart').getContext('2d');
-            initComparisonChart(compCtx, this.historyData);
+            // Default to 'top7'
+            updateComparisonChart(compCtx, this.historyData, 'top7');
 
             if (this.historyData.global) {
                 renderHistoryTable(this.historyData.global, '#historyTable tbody');
@@ -162,7 +183,7 @@ export class StatsModal {
         sortedData.forEach(d => {
             const tr = document.createElement('tr');
             tr.innerHTML = `
-                <td>${d.name}</td>
+                <td>${d.name.replace(/_/g, ' ')}</td>
                 <td>${d.total}</td>
                 <td>${d.missing}</td>
                 <td>${d.coverage}%</td>
