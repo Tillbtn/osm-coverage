@@ -12,7 +12,7 @@ DATA_DIR = "data"
 ALKIS_FILE = os.path.join(DATA_DIR, "alkis_addresses.parquet")
 OSM_FILE = os.path.join(DATA_DIR, "osm_addresses.parquet")
 PBF_FILE = os.path.join(DATA_DIR, "niedersachsen-latest.osm.pbf")
-OUTPUT_DIR = "site"
+OUTPUT_DIR = "site/public"
 STATS_DIR = os.path.join(OUTPUT_DIR, "districts")
 DETAILED_HISTORY_FILE = os.path.join(OUTPUT_DIR, "detailed_history.json")
 

@@ -4,98 +4,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OSM-ALKIS Adressen Vergleich - Niedersachsen</title>
-    <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <title>OSM-ALKIS Niedersachsen</title>
+    <link rel="stylesheet" href="/src/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 </head>
 
-<body>
-    <div id="container">
-        <header>
-            <h1>OSM-ALKIS Adressen Vergleich (Niedersachsen)</h1>
-            <nav style="margin-bottom: 10px;">
-                <a href="buildings.html" style="color: white; text-decoration: underline;">→ Zu Fehlende Gebäude</a>
-            </nav>
-            <div id="stats">
-                Lädt Statistiken...
-            </div>
-            <select id="districtSelect">
-                <option value="Global">Gesamtes Niedersachsen</option>
-            </select>
+<body class="landing-page">
+    <div class="landing-container">
+        <header class="landing-header">
+            <h1>OSM-ALKIS Vergleich</h1>
+            <p>Datenauswertung für Niedersachsen</p>
         </header>
-        <div id="map"></div>
-        <div id="stats-modal" class="modal" style="display:none;">
-            <div class="modal-content">
-                <span class="close-button" onclick="toggleStats()">&times;</span>
-                <h2>Statistiken</h2>
 
-                <div class="stats-section">
-                    <h3>Verlauf der Abdeckung</h3>
-                    <div style="margin-bottom: 10px;">
-                        <label for="statsChartSelect">Anzeige für:</label>
-                        <select id="statsChartSelect">
-                            <option value="global">Gesamtes Niedersachsen</option>
-                            <!-- Options populated by JS -->
-                        </select>
-                    </div>
-                    <div class="chart-container">
-                        <canvas id="historyChart"></canvas>
-                    </div>
+        <div class="cards-grid">
+            <a href="addresses.html" class="card">
+                <div class="card-icon">🏠</div>
+                <h2>Adressabdeckung</h2>
+                <p>Vergleich von ALKIS-Adressen mit OSM-Daten. Statistiken und Verlauf.</p>
+            </a>
 
-                    <!-- New: History Data Table -->
-                    <div style="max-height: 200px; overflow-y: auto; margin-top: 10px;">
-                        <table id="historyTable" style="width: 100%; font-size: 0.9em;">
-                            <thead>
-                                <tr>
-                                    <th>Datum</th>
-                                    <th>Gesamt</th>
-                                    <th>Fehlend</th>
-                                    <th>%</th>
-                                </tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- New: Comparison Chart -->
-                <div id="comparisonChartSection" class="stats-section">
-                    <h3>Vergleich aller Landkreise</h3>
-                    <div class="chart-container" style="height: 400px;">
-                        <canvas id="comparisonChart"></canvas>
-                    </div>
-                </div>
-
-                <div class="stats-section">
-                    <h3>Details pro Landkreis / Gemeinde</h3>
-                    <table id="statsTable">
-                        <thead>
-                            <tr>
-                                <th onclick="sortStats('name')">Name ↕</th>
-                                <th onclick="sortStats('total')">Alle Adressen ↕</th>
-                                <th onclick="sortStats('missing')">Fehlend ↕</th>
-                                <th onclick="sortStats('coverage')">Abdeckung (%) ↕</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <!-- Rows will be populated by JS -->
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <div id="controls"
-            style="position: absolute; bottom: 20px; left: 20px; z-index: 1000; background: white; padding: 10px; border-radius: 5px; display: flex; gap: 10px;">
-            <button onclick="toggleStats()">Statistiken anzeigen</button>
+            <a href="buildings.html" class="card">
+                <div class="card-icon">🏢</div>
+                <h2>Fehlende Gebäude</h2>
+                <p>Visualisierung von Adressen, die nicht innerhalb eines OSM-Gebäudes liegen.</p>
+            </a>
         </div>
     </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-    <script src="app.js"></script>
 </body>
 
 </html>

@@ -9,6 +9,7 @@ site/tiles/
 site/buildings/
 
 site/node_modules/
+site/dist/
 
 *.json
 *.geojson
