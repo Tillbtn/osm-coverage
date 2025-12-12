@@ -4,8 +4,14 @@
 # Data
 data/
 temp_alkis/
-site/districts
-site/tiles
+site/districts/
+site/tiles/
+site/buildings/
+
+site/node_modules/
 
 *.json
 *.geojson
+
+!package.json
+!package-lock.json
