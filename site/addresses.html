@@ -18,78 +18,18 @@
                 <a href="buildings.html" style="color: white; text-decoration: underline;">Fehlende Gebäude</a>
             </nav> -->
             <div class="header-controls">
+                <select id="districtSelect">
+                    <option value="Global">Landkreis auswählen</option>
+                </select>
                 <div id="stats">
                     Lädt Statistiken...
                 </div>
-                <select id="districtSelect">
-                    <option value="Global">Gesamtes Niedersachsen</option>
-                </select>
+                <div id="controls" style="display: flex; gap: 10px;">
+                    <button onclick="toggleStats()">Statistiken anzeigen</button>
+                </div>
             </div>
         </header>
         <div id="map"></div>
-        <div id="stats-modal" class="modal" style="display:none;">
-            <div class="modal-content">
-                <span class="close-button" onclick="toggleStats()">&times;</span>
-                <h2>Statistiken</h2>
-
-                <div class="stats-section">
-                    <h3>Verlauf der Abdeckung</h3>
-                    <div style="margin-bottom: 10px;">
-                        <label for="statsChartSelect">Anzeige für:</label>
-                        <select id="statsChartSelect">
-                            <option value="global">Gesamtes Niedersachsen</option>
-                            <!-- Options populated by JS -->
-                        </select>
-                    </div>
-                    <div class="chart-container">
-                        <canvas id="historyChart"></canvas>
-                    </div>
-
-                    <div style="max-height: 200px; overflow-y: auto; margin-top: 10px;">
-                        <table id="historyTable" style="width: 100%; font-size: 0.9em;">
-                            <thead>
-                                <tr>
-                                    <th>Datum</th>
-                                    <th>Gesamt</th>
-                                    <th>Fehlend</th>
-                                    <th>%</th>
-                                </tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <div id="comparisonChartSection" class="stats-section">
-                    <h3>Vergleich aller Landkreise</h3>
-                    <div class="chart-container" style="height: 400px;">
-                        <canvas id="comparisonChart"></canvas>
-                    </div>
-                </div>
-
-                <div class="stats-section">
-                    <h3>Details pro Landkreis / Gemeinde</h3>
-                    <table id="statsTable">
-                        <thead>
-                            <tr>
-                                <th onclick="sortStats('name')">Name ↕</th>
-                                <th onclick="sortStats('total')">Alle Adressen ↕</th>
-                                <th onclick="sortStats('missing')">Fehlend ↕</th>
-                                <th onclick="sortStats('coverage')">Abdeckung (%) ↕</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <!-- Rows will be populated by JS -->
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <div id="controls"
-            style="position: absolute; bottom: 20px; left: 20px; z-index: 1000; background: white; padding: 10px; border-radius: 5px; display: flex; gap: 10px;">
-            <button onclick="toggleStats()">Statistiken anzeigen</button>
-        </div>
     </div>
 
     <script type="module" src="/src/addresses.js"></script>

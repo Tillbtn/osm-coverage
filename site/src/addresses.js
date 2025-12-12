@@ -2,7 +2,7 @@ import './style.css';
 import L from 'leaflet';
 import { createMap, createJOSMLink } from './modules/map';
 import { fetchDistricts, fetchHistory, fetchGeoJSON } from './modules/api';
-import { initHistoryChart, updateChart, renderHistoryTable, initComparisonChart } from './modules/ui';
+import { StatsModal } from './modules/StatsModal';
 
 // State
 let currentLayer = null;
@@ -35,34 +35,22 @@ Promise.all([
         select.addEventListener('change', (e) => loadDistrict(e.target.value));
     }
 
-    // Populate Stats Chart Select
-    const statsSelect = document.getElementById('statsChartSelect');
-    if (statsSelect) {
-        districts.forEach(d => {
-            const opt = document.createElement('option');
-            opt.value = d.name;
-            opt.textContent = d.name;
-            statsSelect.appendChild(opt);
-        });
-        statsSelect.addEventListener('change', (e) => {
-            const dataset = updateChart(e.target.value, historyDataStore);
-            renderHistoryTable(dataset, '#historyTable tbody');
-        });
+    // Init Stats Modal
+    const statsModal = new StatsModal(districts, history, (name) => {
+        const sel = document.getElementById('districtSelect');
+        if (sel) {
+            sel.value = name;
+            loadDistrict(name);
+        }
+    });
+
+    // Handle "Statistiken anzeigen" button (if present in HTML)
+    // We attach listener to existing button instead of inline onclick
+    const statsBtn = document.querySelector('#controls button');
+    if (statsBtn) {
+        statsBtn.removeAttribute('onclick');
+        statsBtn.addEventListener('click', () => statsModal.toggle());
     }
-
-    // Init Charts
-    if (history) {
-        const historyCtx = document.getElementById('historyChart').getContext('2d');
-        initHistoryChart(historyCtx, history);
-
-        const compCtx = document.getElementById('comparisonChart').getContext('2d');
-        initComparisonChart(compCtx, history);
-
-        if (history.global) renderHistoryTable(history.global, '#historyTable tbody');
-    }
-
-    // Initial Stats Render
-    renderStatsTable();
 
     // Initial Load
     loadDistrict("Global");
@@ -131,59 +119,5 @@ function loadDistrict(name) {
         });
 }
 
-function renderStatsTable() {
-    const tbody = document.querySelector('#statsTable tbody');
-    if (!tbody) return;
-    tbody.innerHTML = '';
+// Globals removed - using StatsModal
 
-    const sortedData = [...districtsData].sort((a, b) => {
-        let valA = a[sortCol];
-        let valB = b[sortCol];
-
-        if (typeof valA === 'string') valA = valA.toLowerCase();
-        if (typeof valB === 'string') valB = valB.toLowerCase();
-
-        if (valA < valB) return sortAsc ? -1 : 1;
-        if (valA > valB) return sortAsc ? 1 : -1;
-        return 0;
-    });
-
-    sortedData.forEach(d => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td>${d.name}</td>
-            <td>${d.total}</td>
-            <td>${d.missing}</td>
-            <td>${d.coverage}%</td>
-        `;
-        tr.onclick = () => {
-            document.getElementById('districtSelect').value = d.name;
-            loadDistrict(d.name);
-            const modal = document.getElementById('stats-modal');
-            if (modal) modal.style.display = "none";
-        };
-        tr.style.cursor = 'pointer';
-        tbody.appendChild(tr);
-    });
-}
-
-// Window globals for HTML onclick handlers (e.g. toggleStats)
-// Since we are module, we need to attach to window explicitly if keeping inline onclicks
-// But better to convert to listeners.
-// For now, attaching to window for backward compatibility with HTML
-window.toggleStats = function () {
-    const modal = document.getElementById('stats-modal');
-    if (modal) {
-        modal.style.display = modal.style.display === 'block' ? 'none' : 'block';
-    }
-};
-
-window.sortStats = function (col) {
-    if (sortCol === col) {
-        sortAsc = !sortAsc;
-    } else {
-        sortCol = col;
-        sortAsc = true;
-    }
-    renderStatsTable();
-};
