@@ -1,0 +1,28 @@
+services:
+  web:
+    image: nginx:alpine
+    container_name: osm_cover_web
+    ports:
+      - "8080:80"
+    volumes:
+      - ./site/dist:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # Overlay dynamic data from host
+      - ./site/public/districts:/usr/share/nginx/html/districts:ro
+      - ./site/public/detailed_history.json:/usr/share/nginx/html/detailed_history.json:ro
+      - ./site/public/districts.json:/usr/share/nginx/html/districts.json:ro
+      # Also mount missing buildings if needed (assuming it is generated there)
+      - ./site/public/missing_buildings.geojson:/usr/share/nginx/html/missing_buildings.geojson:ro
+      - ./site/public/diff.geojson:/usr/share/nginx/html/diff.geojson:ro
+      - ./site/public/tiles:/usr/share/nginx/html/tiles:ro
+    restart: unless-stopped
+
+  worker:
+    build: .
+    container_name: osm_cover_worker
+    volumes:
+      - ./data:/app/data
+      - ./site:/app/site
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
