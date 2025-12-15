@@ -137,7 +137,21 @@ def download_pbf():
                 f.write(chunk)
     print("Download complete.")
 
+
 def main():
+    # Check if update is needed
+    try:
+        import check_geofabrik_export_date
+        print("Checking if OSM update is required...")
+        remote_date = check_geofabrik_export_date.get_remote_date()
+        local_date = check_geofabrik_export_date.get_local_date()
+        
+        if remote_date and local_date and remote_date <= local_date:
+            print(f"No update needed. Remote ({remote_date}) <= Local ({local_date})")
+            return
+    except ImportError:
+        print("Warning: Could not import check_geofabrik_export_date. Skipping Date Check.")
+
     os.makedirs(DATA_DIR, exist_ok=True)
     download_pbf()
     
