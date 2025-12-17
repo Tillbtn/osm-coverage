@@ -16,6 +16,7 @@ export function initHistoryChart(ctx, historyData) {
             datasets: [{
                 label: 'Abdeckung (%)',
                 data: globalData.map(h => h.coverage || h.coverage_percent),
+                rawData: globalData,
                 borderColor: 'rgb(75, 192, 192)',
                 tension: 0.1
             }]
@@ -26,7 +27,49 @@ export function initHistoryChart(ctx, historyData) {
             scales: {
                 y: {
                     beginAtZero: false,
-                    title: { display: true, text: 'Abdeckung (%)' }
+                    title: { display: true, text: 'Abdeckung (%)' },
+                    ticks: { callback: (val) => val.toFixed(2) + '%' }
+                }
+            },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function (context) {
+                            let label = context.dataset.label || '';
+                            if (label) {
+                                label += ': ';
+                            }
+                            if (context.parsed.y !== null) {
+                                label += context.parsed.y.toFixed(2) + '%';
+                            }
+                            return label;
+                        },
+                        afterLabel: function (context) {
+                            const index = context.dataIndex;
+                            const dataset = context.dataset.data;
+                            const rawData = context.dataset.rawData;
+
+                            if (index > 0) {
+                                const current = dataset[index];
+                                const previous = dataset[index - 1];
+                                const diff = (current - previous).toFixed(2);
+                                const sign = diff >= 0 ? '+' : '';
+
+                                let lines = [`${sign}${diff}%`];
+
+                                if (rawData) {
+                                    const currMiss = rawData[index].missing ?? rawData[index].missing_count ?? 0;
+                                    const prevMiss = rawData[index - 1].missing ?? rawData[index - 1].missing_count ?? 0;
+                                    const absDiff = prevMiss - currMiss;
+                                    const absSign = absDiff >= 0 ? '+' : '';
+                                    lines.push(`${absSign}${absDiff} Adressen`);
+                                }
+
+                                return lines;
+                            }
+                            return null;
+                        }
+                    }
                 }
             }
         }
@@ -47,6 +90,7 @@ export function updateChart(districtName, historyData) {
     // Update chart
     chartInstance.data.labels = dataset.map(h => h.date);
     chartInstance.data.datasets[0].data = dataset.map(h => h.coverage || h.coverage_percent);
+    chartInstance.data.datasets[0].rawData = dataset;
     chartInstance.data.datasets[0].label = `Abdeckung ${districtName} (%)`;
     chartInstance.update();
 
@@ -70,7 +114,7 @@ export function renderHistoryTable(dataset, tableBodyId) {
             <td>${h.date}</td>
             <td>${total}</td>
             <td>${missing}</td>
-            <td>${cov}%</td>
+            <td>${cov.toFixed(2)}%</td>
         `;
         tbody.appendChild(tr);
     });
@@ -86,47 +130,55 @@ export function updateComparisonChart(ctx, historyData, mode = 'lines') {
     const districts = historyData.districts || {};
 
     // --- MODE: LINES (All Districts) ---
-    if (mode === 'lines') {
-        const datasets = [];
-        const getColor = (str) => {
-            let hash = 0;
-            for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
-            const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
-            return '#' + "00000".substring(0, 6 - c.length) + c;
-        };
+    // if (mode === 'lines') {
+    //     const datasets = [];
+    //     const getColor = (str) => {
+    //         let hash = 0;
+    //         for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    //         const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
+    //         return '#' + "00000".substring(0, 6 - c.length) + c;
+    //     };
 
-        Object.keys(districts).forEach(name => {
-            const dHist = districts[name];
-            if (!dHist || dHist.length === 0) return;
-            datasets.push({
-                label: name,
-                data: dHist.map(h => h.coverage || h.coverage_percent),
-                borderColor: getColor(name),
-                points: false, pointRadius: 0, borderWidth: 1, fill: false, tension: 0.1
-            });
-        });
+    //     Object.keys(districts).forEach(name => {
+    //         const dHist = districts[name];
+    //         if (!dHist || dHist.length === 0) return;
+    //         datasets.push({
+    //             label: name,
+    //             data: dHist.map(h => h.coverage || h.coverage_percent),
+    //             borderColor: getColor(name),
+    //             points: false, pointRadius: 0, borderWidth: 1, fill: false, tension: 0.1
+    //         });
+    //     });
 
-        const uniqueDates = new Set();
-        if (historyData.global) historyData.global.forEach(h => uniqueDates.add(h.date));
-        Object.values(districts).forEach(arr => arr.forEach(h => uniqueDates.add(h.date)));
-        const labels = Array.from(uniqueDates).sort();
+    //     const uniqueDates = new Set();
+    //     if (historyData.global) historyData.global.forEach(h => uniqueDates.add(h.date));
+    //     Object.values(districts).forEach(arr => arr.forEach(h => uniqueDates.add(h.date)));
+    //     const labels = Array.from(uniqueDates).sort();
 
-        comparisonChartInstance = new Chart(ctx, {
-            type: 'line',
-            data: { labels, datasets },
-            options: {
-                maintainAspectRatio: false, responsive: true,
-                interaction: { mode: 'nearest', axis: 'x', intersect: false },
-                plugins: { legend: { display: false } }, // Hide legend for 40+ lines
-                scales: { y: { beginAtZero: false, title: { display: true, text: 'Abdeckung (%)' } } }
-            }
-        });
-        return;
-    }
+    //     comparisonChartInstance = new Chart(ctx, {
+    //         type: 'line',
+    //         data: { labels, datasets },
+    //         options: {
+    //             maintainAspectRatio: false, responsive: true,
+    //             interaction: { mode: 'nearest', axis: 'x', intersect: false },
+    //             plugins: { legend: { display: false } }, // Hide legend for 40+ lines
+    //             scales: {
+    //                 y: {
+    //                     beginAtZero: false,
+    //                     title: { display: true, text: 'Abdeckung (%)' },
+    //                     ticks: { callback: (val) => val.toFixed(2) + '%' }
+    //                 }
+    //             }
+    //         }
+    //     });
+    //     return;
+    // }
 
     // --- MODE: TOP IMPROVERS (Bar Chart) ---
-    // mode = 'top7' or 'top30'
-    const days = mode === 'top30' ? 30 : 7;
+    // mode = 'top1', 'top7' or 'top30'
+    let days = 7;
+    if (mode === 'top30') days = 30;
+    if (mode === 'top1') days = 1;
 
     // Calculate improvements
     const improvers = [];
@@ -201,3 +253,30 @@ export function updateComparisonChart(ctx, historyData, mode = 'lines') {
         }
     });
 }
+
+export function calculateGlobalDiff(historyData, mode) {
+    if (!historyData || !historyData.global) return 0;
+
+    let days = 7;
+    if (mode === 'top30') days = 30;
+    if (mode === 'top1') days = 1;
+
+    const globalHist = historyData.global;
+    if (globalHist.length < 2) return 0;
+
+    const latest = globalHist[globalHist.length - 1];
+    const latestDate = new Date(latest.date);
+
+    const targetDate = new Date(latestDate);
+    targetDate.setDate(latestDate.getDate() - days);
+    const targetDateStr = targetDate.toISOString().split('T')[0];
+
+    let past = globalHist.find(h => h.date >= targetDateStr);
+    if (!past) past = globalHist[0];
+
+    const currentMissing = latest.missing ?? latest.missing_count ?? 0;
+    const pastMissing = past.missing ?? past.missing_count ?? 0;
+
+    return pastMissing - currentMissing;
+}
+

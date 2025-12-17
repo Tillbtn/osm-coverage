@@ -1,5 +1,5 @@
 
-import { initHistoryChart, updateChart, updateComparisonChart, renderHistoryTable } from './ui.js';
+import { initHistoryChart, updateChart, updateComparisonChart, renderHistoryTable, calculateGlobalDiff } from './ui.js';
 
 export class StatsModal {
     constructor(districtsData, historyData, onSelectDistrict) {
@@ -58,10 +58,13 @@ export class StatsModal {
 
                 <div id="comparisonChartSection" class="stats-section">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                        <h3>Vergleich aller Landkreise</h3>
+                        <h3>Top 10 Landkreise <span id="globalDiffDisplay" style="font-size: 0.8em; color: #666; margin-left: 10px;"></span></h3>
+                        
                         <select id="compChartMode" style="padding: 5px;">
-                            <option value="top7">7 Tage</option>
+                            <option value="top1">1 Tag</option>
+                            <option value="top7" selected>7 Tage</option>
                             <option value="top30">30 Tage</option>
+                            <!-- <option value="lines">Linien</option> -->
                         </select>
                     </div>
                     <div class="chart-container" style="height: 400px;">
@@ -69,21 +72,23 @@ export class StatsModal {
                     </div>
                 </div>
 
-                <div class="stats-section">
+                <div id="statsTableSection" class="stats-section">
                     <h3>Details pro Landkreis / Gemeinde</h3>
-                    <table id="statsTable">
-                        <thead>
-                            <tr>
-                                <th data-sort="name" style="cursor: pointer;">Name ↕</th>
-                                <th data-sort="total" style="cursor: pointer;">Alle Adressen ↕</th>
-                                <th data-sort="missing" style="cursor: pointer;">Fehlend ↕</th>
-                                <th data-sort="coverage" style="cursor: pointer;">Abdeckung (%) ↕</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <!-- Rows will be populated by JS -->
-                        </tbody>
-                    </table>
+                    <div style="max-height: 300px; overflow-y: auto;">
+                        <table id="statsTable">
+                            <thead>
+                                <tr>
+                                    <th data-sort="name" style="cursor: pointer;">Name ↕</th>
+                                    <th data-sort="total" style="cursor: pointer;">Alle Adressen ↕</th>
+                                    <th data-sort="missing" style="cursor: pointer;">Fehlend ↕</th>
+                                    <th data-sort="coverage" style="cursor: pointer;">Abdeckung (%) ↕</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Rows will be populated by JS -->
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>`;
@@ -128,6 +133,9 @@ export class StatsModal {
             const isGlobal = (e.target.value === "global");
             const compSection = document.getElementById('comparisonChartSection');
             if (compSection) compSection.style.display = isGlobal ? 'block' : 'none';
+
+            const tableSection = document.getElementById('statsTableSection');
+            if (tableSection) tableSection.style.display = isGlobal ? 'block' : 'none';
         });
 
         // Comparison Chart Mode Select
@@ -135,6 +143,13 @@ export class StatsModal {
             this.compModeSelect.addEventListener('change', (e) => {
                 const ctx = document.getElementById('comparisonChart').getContext('2d');
                 updateComparisonChart(ctx, this.historyData, e.target.value);
+
+                const gDiff = calculateGlobalDiff(this.historyData, e.target.value);
+                const gSpan = document.getElementById('globalDiffDisplay');
+                if (gSpan) {
+                    const sign = gDiff >= 0 ? '+' : '';
+                    gSpan.textContent = `(gesamt: ${sign}${gDiff} Adressen)`;
+                }
             });
         }
 
@@ -156,6 +171,13 @@ export class StatsModal {
             const compCtx = document.getElementById('comparisonChart').getContext('2d');
             // Default to 'top7'
             updateComparisonChart(compCtx, this.historyData, 'top7');
+
+            const gDiff = calculateGlobalDiff(this.historyData, 'top7');
+            const gSpan = document.getElementById('globalDiffDisplay');
+            if (gSpan) {
+                const sign = gDiff >= 0 ? '+' : '';
+                gSpan.textContent = `(gesamt: ${sign}${gDiff} Adressen)`;
+            }
 
             if (this.historyData.global) {
                 renderHistoryTable(this.historyData.global, '#historyTable tbody');
