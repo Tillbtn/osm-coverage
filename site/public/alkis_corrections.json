@@ -1,0 +1,22 @@
+[
+    {
+        "from_street": "Graf-Sch.-v.-Stauffenberg-Str.",
+        "city": "Lüneburg",
+        "to_street": "Graf-Schenk-von-Stauffenberg-Str."
+    },
+    {
+        "comment": "Optional: single numbers",
+        "from_street": "Teststraße",
+        "from_housenumber": "1b",
+        "city": "Lüneburg",
+        "to_street": "Teststraße",
+        "to_housenumber": "1a"
+    },
+    {
+        "comment": "Optional: ignore numbers",
+        "from_street": "Teststraße",
+        "from_housenumber": "1c",
+        "city": "Lüneburg",
+        "ignore": true
+    }
+]

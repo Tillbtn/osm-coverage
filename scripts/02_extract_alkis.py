@@ -62,6 +62,20 @@ def extract_addresses_from_gpkg(gpkg_path):
         elif 'haus_nr' in gdf.columns: hnr_col = 'haus_nr'
         elif 'hsnr' in gdf.columns: hnr_col = 'hsnr'
         elif 'hnr' in gdf.columns: hnr_col = 'hnr'
+
+        # Postcode candidates
+        plz_col = None
+        if 'plz' in gdf.columns: plz_col = 'plz'
+        elif 'postleitzahl' in gdf.columns: plz_col = 'postleitzahl'
+
+        # City candidates
+        city_col = None
+        if 'ort' in gdf.columns: city_col = 'ort'
+        elif 'gemeinde' in gdf.columns: city_col = 'gemeinde'
+        elif 'landkreis' in gdf.columns: city_col = 'landkreis' # Fallback if no specific city? Or maybe 'ortsteil'?
+        # Prefer more specific
+        if 'ort_name' in gdf.columns: city_col = 'ort_name'
+
         
         if not street_col or not hnr_col:
             # Try to guess based on content text
@@ -77,8 +91,24 @@ def extract_addresses_from_gpkg(gpkg_path):
             # Ensure we don't modify the original slice warning
             gdf = gdf.copy()
             gdf = gdf[gdf[hnr_col].notna() & gdf[street_col].notna()]
-            gdf = gdf[[street_col, hnr_col, 'geometry']]
-            gdf = gdf.rename(columns={street_col: 'street', hnr_col: 'housenumber'})
+            
+            # Select columns
+            keep_cols = [street_col, hnr_col, 'geometry']
+            rename_map = {street_col: 'street', hnr_col: 'housenumber'}
+            
+            if plz_col:
+                keep_cols.append(plz_col)
+                rename_map[plz_col] = 'postcode'
+            if city_col:
+                keep_cols.append(city_col)
+                rename_map[city_col] = 'city'
+            
+            gdf = gdf[keep_cols]
+            gdf = gdf.rename(columns=rename_map)
+            
+            # Ensure missing optional columns exist as NaN for consistency
+            if 'postcode' not in gdf.columns: gdf['postcode'] = None
+            if 'city' not in gdf.columns: gdf['city'] = None
             
             # Convert to points (centroids) if they are polygons
             # ALKIS buildings are polygons
@@ -97,11 +127,16 @@ def extract_addresses_from_gpkg(gpkg_path):
 def main():
     zip_files = glob.glob(os.path.join(ALKIS_DIR, "*.zip"))
     
+    # Also find loose GPKG files (already extracted)
+    # Using recursive glob to find gpkgs in subdirectories
+    gpkg_files = glob.glob(os.path.join(ALKIS_DIR, "**/*.gpkg"), recursive=True)
+    
     all_addresses = []
     
-    print(f"Found {len(zip_files)} ZIP files.")
+    print(f"Found {len(zip_files)} ZIP files and {len(gpkg_files)} GPKG files.")
     
-    for zip_file in tqdm.tqdm(zip_files):
+    # Process ZIPs
+    for zip_file in tqdm.tqdm(zip_files, desc="Processing ZIPs"):
         # Unzip to temp location
         dirname = os.path.splitext(zip_file)[0]
         if not os.path.exists(dirname):
@@ -112,9 +147,7 @@ def main():
                 print(f"Skipping bad zip: {zip_file}")
                 continue
         
-        # Get District Name from filename (e.g. lkr_03157_Peine_kon.gpkg.zip -> Peine)
-        # format is usually lkr_XXXXX_Name_kon...
-        # Simple parse:
+        # Get District Name from filename
         base = os.path.basename(zip_file)
         parts = base.split('_')
         if len(parts) >= 4:
@@ -128,14 +161,55 @@ def main():
         # Find gpkg
         gpkgs = glob.glob(os.path.join(dirname, "*.gpkg"))
         for gpkg in gpkgs:
-            gdf = extract_addresses_from_gpkg(gpkg)
-            if gdf is not None and not gdf.empty:
-                gdf['district'] = district_name
-                all_addresses.append(gdf)
+            # Avoid re-processing if it is also in gpkg_files list
+            # But the path will be different if we just unzipped to a temp dir?
+            # Actually, standard behavior of this script seems to imply it extracts permanently to subdirs?
+            # If so, gpkg_files will contain them.
+            # let's just process. Duplicates? 
+            # We should probably process EITHER zips OR existing gpkgs to avoid duplication if both exist.
+            # A simple set of processed paths?
+            pass
 
+    # Actually, better logic: 
+    # If we have GPKGs, just use them.
+    # The ZIP logic extracts them. If they are already extracted, we technically don't need to process ZIPs again if we scan for GPKGs.
+    # But we need the District Name logic which was derived from ZIP name.
+    # If we use GPKG filename, we can derive District Name too.
+    
+    # Unified Processing List
+    # We will process all found GPKGs. If ZIPs exist but not extracted, we should extract them.
+    
+    # Step 1: Ensure extraction
+    for zip_file in tqdm.tqdm(zip_files, desc="Extracting ZIPs"):
+         dirname = os.path.splitext(zip_file)[0]
+         if not os.path.exists(dirname):
+             try:
+                with zipfile.ZipFile(zip_file, 'r') as zf:
+                    zf.extractall(dirname)
+             except:
+                 pass
+
+    # Step 2: Find all GPKGs again (now including newly extracted)
+    gpkg_files = glob.glob(os.path.join(ALKIS_DIR, "**/*.gpkg"), recursive=True)
+    print(f"Total GPKGs to process: {len(gpkg_files)}")
+    
+    for gpkg in tqdm.tqdm(gpkg_files, desc="Processing GPKGs"):
+        # Derive district name from filename
+        # File: lkr_03101_Stadt_Braunschweig_kon.gpkg
+        base = os.path.basename(gpkg)
+        parts = base.split('_')
+        district_name = base
+        if len(parts) >= 4:
+             if len(parts) == 4:
+                district_name = parts[2]
+             elif len(parts) == 5:
+                district_name = f"{parts[2]}_{parts[3]}"
         
-        # Cleanup (optional, keeping extracted might be useful for debugging)
-        # shutil.rmtree(dirname)
+        # Extract
+        gdf = extract_addresses_from_gpkg(gpkg)
+        if gdf is not None and not gdf.empty:
+            gdf['district'] = district_name
+            all_addresses.append(gdf)
 
     if all_addresses:
         print("Concatenating...")

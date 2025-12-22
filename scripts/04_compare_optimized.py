@@ -15,7 +15,7 @@ PBF_FILE = os.path.join(DATA_DIR, "niedersachsen-latest.osm.pbf")
 OUTPUT_DIR = "site/public"
 STATS_DIR = os.path.join(OUTPUT_DIR, "districts")
 DETAILED_HISTORY_FILE = os.path.join(OUTPUT_DIR, "detailed_history.json")
-
+CORRECTIONS_FILE = "site/public/alkis_corrections.json"
 
 def main():
     if not os.path.exists(ALKIS_FILE) or not os.path.exists(OSM_FILE):
@@ -27,6 +27,69 @@ def main():
     osm = gpd.read_parquet(OSM_FILE)
     
     print(f"ALKIS: {len(alkis)}, OSM: {len(osm)}")
+
+    # Apply Corrections
+    if os.path.exists(CORRECTIONS_FILE):
+        print("Applying manual corrections...")
+        try:
+            with open(CORRECTIONS_FILE, 'r', encoding='utf-8') as f:
+                corrections = json.load(f)
+            
+            applied_count = 0
+            dropped_count = 0
+            
+            for c in corrections:
+                # Ensure we match string types
+                f_str = str(c.get("from_street", "")).strip()
+                f_hnr = c.get("from_hnr")
+                
+                # Base mask: Street
+                mask = (alkis['street'] == f_str)
+                
+                # Optional: Housenumber
+                if f_hnr is not None and str(f_hnr).strip() != "*":
+                     mask &= (alkis['housenumber'] == str(f_hnr).strip())
+                
+                # Optional: City
+                if "city" in c and c["city"]:
+                     city_val = str(c["city"])
+                     city_mask = pd.Series(False, index=alkis.index)
+                     if 'city' in alkis.columns:
+                         city_mask |= (alkis['city'] == city_val)
+                     if 'district' in alkis.columns:
+                         city_mask |= (alkis['district'] == city_val)
+                         city_mask |= (alkis['district'].str.contains(city_val, case=False, regex=False))
+                     mask &= city_mask
+                
+                if not mask.any():
+                    continue
+                    
+                if c.get("ignore", False):
+                    # Drop
+                    dropped_count += mask.sum()
+                    alkis = alkis[~mask]
+                else:
+                    # Replace
+                    t_str = c.get("to_street")
+                    t_hnr = c.get("to_hnr")
+                    
+                    if t_str:
+                        alkis.loc[mask, 'street'] = str(t_str).strip()
+                    
+                    if t_hnr:
+                        if str(t_hnr).strip() == "*":
+                             pass
+                        else:
+                             alkis.loc[mask, 'housenumber'] = str(t_hnr).strip()
+                             
+                    applied_count += mask.sum()
+            
+            print(f"  Applied {applied_count} corrections. Dropped {dropped_count} addresses.")
+            
+        except Exception as e:
+            print(f"  Error applying corrections: {e}")
+    else:
+        print("No corrections file found.")
     
     # Normalize
     # Normalize (Vectorized)
