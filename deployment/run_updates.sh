@@ -36,6 +36,11 @@ while true; do
         # python scripts/04_compare.py
         python scripts/04_compare_optimized.py
 
+        # Backup History logic
+        echo "Backing up history..."
+        mkdir -p backups
+        cp site/public/detailed_history.json backups/detailed_history_$(date +%F).json
+
         # 5. Generate Tiles
         # echo "Running 05_generate_mvt.py..."
         # python scripts/05_generate_mvt.py

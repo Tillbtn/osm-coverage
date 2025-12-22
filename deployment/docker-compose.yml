@@ -14,7 +14,6 @@ services:
       # Also mount missing buildings if needed (assuming it is generated there)
       - ./site/public/missing_buildings.geojson:/usr/share/nginx/html/missing_buildings.geojson:ro
       - ./site/public/diff.geojson:/usr/share/nginx/html/diff.geojson:ro
-      - ./site/public/tiles:/usr/share/nginx/html/tiles:ro
     restart: unless-stopped
 
   worker:
@@ -23,6 +22,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./site:/app/site
+      - ./backups:/app/backups
     environment:
       - PYTHONUNBUFFERED=1
-    restart: unless-stopped
