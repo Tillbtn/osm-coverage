@@ -37,11 +37,15 @@ This guide explains how to deploy the OSM Coverage Site on a Proxmox server usin
     ssh root@192.168.178.57 "mkdir -p /root/nds-addresses/site"
     
     # Now copy files
-    # Copy 'dist' INTO 'site' -> /root/nds-addresses/site/dist
-    scp -r site/dist root@192.168.178.57:/root/nds-addresses/site/
+    # Copy 'assets' (JS/CSS) to 'dist' -> /root/nds-addresses/site/dist/assets
+    scp -r site/dist/assets root@192.168.178.57:/root/nds-addresses/site/dist/
+
+    # Copy HTML files to 'dist'
+    scp site/dist/*.html root@192.168.178.57:/root/nds-addresses/site/dist/
     
     # Copy 'public' INTO 'site' -> /root/nds-addresses/site/public
-    scp -r site/public root@192.168.178.57:/root/nds-addresses/site/
+    # CAUTION: This folder contains data. Uncomment only if you need to update static assets in public/
+    # scp -r site/public root@192.168.178.57:/root/nds-addresses/site/
     
     # Copy scripts to root folder
     scp -r scripts root@192.168.178.57:/root/nds-addresses/
