@@ -55,16 +55,9 @@ class AddressHandler(osmium.SimpleHandler):
     def node(self, n):
         self.process_object(n, self.wkbfab.create_point)
 
-    def way(self, w):
+    def area(self, a):
         try:
-             # Ways are LineStrings in PBF terms
-             self.process_object(w, lambda x: self.wkbfab.create_linestring(x))
-        except:
-             pass
-
-    def relation(self, r):
-        try:
-             self.process_object(r, lambda x: self.wkbfab.create_multipolygon(x))
+             self.process_object(a, lambda x: self.wkbfab.create_multipolygon(x))
         except:
              pass
 
@@ -123,7 +116,30 @@ def main():
     handler = AddressHandler()
     
     try:
-        handler.apply_file(PBF_FILE, locations=True, idx="sparse_file_array")
+        # Use AreaManager with 2-pass approach
+        am = osmium.area.AreaManager()
+        
+        # Pass 1: Scan relations
+        print("Pass 1: Scanning relations (AreaManager)...")
+        reader1 = osmium.io.Reader(PBF_FILE)
+        osmium.apply(reader1, am.first_pass_handler())
+        reader1.close()
+        
+        # Pass 2: Assembly and processing
+        print("Pass 2: Assembling areas and extracting addresses...")
+        # We pass our handler to the second pass handler
+        # Reader does NOT take locations argument; we must use a LocationHandler
+        reader2 = osmium.io.Reader(PBF_FILE)
+        
+        # Location Handler
+        idx = osmium.index.create_map("sparse_file_array")
+        lh = osmium.NodeLocationsForWays(idx)
+        lh.ignore_errors() # Ignore missing nodes if any
+        
+        # Apply: LocationHandler first, then AreaManager
+        osmium.apply(reader2, lh, am.second_pass_handler(handler))
+        reader2.close()
+        
     except Exception as e:
         print(f"\nError processing PBF: {e}")
         return
