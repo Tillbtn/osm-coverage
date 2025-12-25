@@ -136,8 +136,10 @@ def main():
         lh = osmium.NodeLocationsForWays(idx)
         lh.ignore_errors() # Ignore missing nodes if any
         
-        # Apply: LocationHandler first, then AreaManager
-        osmium.apply(reader2, lh, am.second_pass_handler(handler))
+        # Apply: LocationHandler first, then Handler (for nodes), then AreaManager (for areas)
+        # We need to pass 'handler' explicitly so it receives node() callbacks.
+        # The AreaManager's handler will call handler.area() for assembled areas.
+        osmium.apply(reader2, lh, handler, am.second_pass_handler(handler))
         reader2.close()
         
     except Exception as e:

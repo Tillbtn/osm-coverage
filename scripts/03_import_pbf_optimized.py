@@ -172,7 +172,7 @@ def main():
         lh = osmium.NodeLocationsForWays(idx)
         lh.ignore_errors()
         
-        osmium.apply(reader2, lh, am.second_pass_handler(handler))
+        osmium.apply(reader2, lh, handler, am.second_pass_handler(handler))
         reader2.close()
         
         # Final flush
