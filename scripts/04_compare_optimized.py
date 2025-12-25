@@ -111,7 +111,7 @@ def main():
     }
     
     # ALKIS Street
-    alkis['street_norm'] = alkis['street'].str.lower().str.strip()
+    alkis['street_norm'] = alkis['street'].str.lower().str.replace(r'\s*\(.*?\)', '', regex=True).str.strip()
     for k, v in replacements.items():
         alkis['street_norm'] = alkis['street_norm'].str.replace(k, v, regex=False)
         
@@ -119,7 +119,7 @@ def main():
     alkis['hnr_norm'] = alkis['housenumber'].str.lower().str.strip().str.replace(" ", "", regex=False)
     
     # OSM Street
-    osm['street_norm'] = osm['street'].str.lower().str.strip()
+    osm['street_norm'] = osm['street'].str.lower().str.replace(r'\s*\(.*?\)', '', regex=True).str.strip()
     for k, v in replacements.items():
         osm['street_norm'] = osm['street_norm'].str.replace(k, v, regex=False)
 

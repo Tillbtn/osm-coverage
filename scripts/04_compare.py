@@ -6,6 +6,7 @@ import os
 import json
 import datetime
 import osmium
+import re
 
 # Configuration
 DATA_DIR = "data"
@@ -21,6 +22,7 @@ def normalize_street(name):
     if not isinstance(name, str):
         return ""
     name = name.lower()
+    name = re.sub(r'\s*\(.*?\)', '', name)
     name = name.replace("straße", "str.")
     name = name.replace("str.", "str.") 
     name = name.replace("strasse", "str.")
