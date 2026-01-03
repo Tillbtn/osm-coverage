@@ -1,14 +1,14 @@
-
 import os
 import requests
-import json
+import xml.etree.ElementTree as ET
 import tqdm
 from concurrent.futures import ThreadPoolExecutor
 
 # Configuration
-GEOJSON_URL = "https://arcgis-geojson.s3.eu-de.cloud-object-storage.appdomain.cloud/alkis-vektor/lgln-opengeodata-alkis-vektor.geojson"
+BASE_URL = "https://www.opengeodata.nrw.de/produkte/geobasis/lk/akt/gru_vereinfacht_gpkg/"
+INDEX_URL = BASE_URL + "index.html" 
 DATA_DIR = "data"
-ALKIS_DIR = os.path.join(DATA_DIR, "alkis")
+ALKIS_DIR = os.path.join(DATA_DIR, "nrw", "alkis")
 
 def download_file(url, dest_path):
     if os.path.exists(dest_path):
@@ -32,32 +32,40 @@ def download_file(url, dest_path):
                 bar.update(size)
     except Exception as e:
         print(f"Error downloading {url}: {e}")
+        if os.path.exists(dest_path):
+            os.remove(dest_path)
 
 def main():
     os.makedirs(ALKIS_DIR, exist_ok=True)
     
-    print("Fetching metadata GeoJSON...")
-    resp = requests.get(GEOJSON_URL)
+    print(f"Fetching index from {BASE_URL}...")
+    resp = requests.get(BASE_URL)
     resp.raise_for_status()
-    data = resp.json()
+    
+    try:
+        root = ET.fromstring(resp.content)
+    except ET.ParseError:
+        print("Direct parse failed, trying index.html...")
+        resp = requests.get(BASE_URL + "index.html")
+        resp.raise_for_status()
+        root = ET.fromstring(resp.content)
+
+    files = []
+    for file_node in root.findall(".//file"):
+        name = file_node.get("name")
+        if name and name.endswith(".zip"):
+            files.append(name)
+            
+    print(f"Found {len(files)} files.")
     
     download_tasks = []
-    
-    print(f"Found {len(data['features'])} districts.")
-    
-    for feature in data['features']:
-        props = feature['properties']
-        zip_url = props.get('zip')
-        if not zip_url:
-            continue
-            
-        filename = zip_url.split('/')[-1]
+    for filename in files:
+        url = BASE_URL + filename
         dest_path = os.path.join(ALKIS_DIR, filename)
-        download_tasks.append((zip_url, dest_path))
+        download_tasks.append((url, dest_path))
         
     print(f"Starting download of {len(download_tasks)} files...")
     
-    # Download in parallel (conservative 4 threads)
     with ThreadPoolExecutor(max_workers=4) as executor:
         for url, path in download_tasks:
             executor.submit(download_file, url, path)
