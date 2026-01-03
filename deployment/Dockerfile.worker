@@ -1,0 +1,41 @@
+FROM python:3.10-slim
+
+# Install system dependencies for GDAL and Osmium
+RUN apt-get update && apt-get install -y \
+    gdal-bin \
+    libgdal-dev \
+    g++ \
+    libosmium2-dev \
+    libprotozero-dev \
+    libboost-program-options-dev \
+    libboost-dev \
+    libexpat1-dev \
+    zlib1g-dev \
+    libbz2-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set environment variables for GDAL
+ENV CPLUS_INCLUDE_PATH=/usr/include/gdal
+ENV C_INCLUDE_PATH=/usr/include/gdal
+
+WORKDIR /app
+
+# Install Python dependencies
+COPY deployment/requirements.txt .
+# Ensure osmium is in requirements or install it explicitly
+RUN pip install --no-cache-dir -r requirements.txt osmium
+
+# Copy scripts
+COPY scripts/ scripts/
+
+# Create output directories
+RUN mkdir -p site/public/states \
+    && mkdir -p site/public/districts \
+    && mkdir -p site/public/tiles \
+    && mkdir -p data
+
+# Copy runner
+COPY deployment/run_updates.sh .
+RUN chmod +x run_updates.sh
+
+CMD ["./run_updates.sh"]
