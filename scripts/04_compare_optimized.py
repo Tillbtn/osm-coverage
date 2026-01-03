@@ -1,4 +1,3 @@
-
 import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Point
@@ -6,310 +5,326 @@ import os
 import json
 import datetime
 import osmium
+import re
+import numpy as np
+import tqdm
 
-# Configuration
-DATA_DIR = "data"
-ALKIS_FILE = os.path.join(DATA_DIR, "alkis_addresses.parquet")
-OSM_FILE = os.path.join(DATA_DIR, "osm_addresses.parquet")
-PBF_FILE = os.path.join(DATA_DIR, "niedersachsen-latest.osm.pbf")
-OUTPUT_DIR = "site/public"
-STATS_DIR = os.path.join(OUTPUT_DIR, "districts")
-DETAILED_HISTORY_FILE = os.path.join(OUTPUT_DIR, "detailed_history.json")
-CORRECTIONS_FILE = "site/public/alkis_corrections.json"
+def normalize_key(street, hnr):
+    s = str(street).lower()
+    s = re.sub(r'\(.*?\)', '', s)
+    s = s.replace("ß", "ss")
+    s = s.replace("bgm.", "bürgermeister")
+    s = s.replace("pl.", "platz")
+    s = s.replace("prof.", "professor")
+    s = s.replace("str.", "strasse") 
+    s = s.replace("str ", "strasse ")
+    s = s.replace(" ", "").replace("-", "").replace(".", "").replace("/", "")
+    
+    h = str(hnr).lower().replace(" ", "")
+    return f"{s}{h}"
+
+def split_alkis_address_string(original_street, original_hnr_string):
+    """
+    Parses "Straße 1, 2, Weg 3" into [("Straße", "1"), ("Straße", "2"), ("Weg", "3")]
+    """
+    if not isinstance(original_hnr_string, str): 
+         return [(original_street, original_hnr_string)]
+         
+    original_hnr_string = original_hnr_string.replace(';', ',')
+
+    if ',' not in original_hnr_string:
+        return [(original_street, original_hnr_string)]
+        
+    parts = original_hnr_string.split(',')
+    results = []
+    
+    current_street = original_street
+    
+    street_pattern = re.compile(r'^\s*([^\d].*?)\s+([0-9].*)$')
+    
+    first = True
+    for part in parts:
+        part = part.strip()
+        if not part: continue
+        
+        if first:
+            results.append((current_street, part))
+            first = False
+            continue
+                
+        match = street_pattern.match(part)
+        if match:
+            current_street = match.group(1)
+            hnr = match.group(2)
+            results.append((current_street, hnr))
+        else:
+            results.append((current_street, part))
+            
+    return results
+
+def process_nrw_splits(alkis_df):
+    """
+    Splits rows with commas in housenumber for NRW.
+    """
+    mask = alkis_df['housenumber'].astype(str).str.contains(r'[,;]', regex=True)
+    if not mask.any():
+        return alkis_df
+        
+    print(f"[NRW] Found {mask.sum()} complex address rows. Splitting...")
+    
+    rows_to_split = alkis_df[mask]
+    clean_rows = alkis_df[~mask]
+    
+    new_data = []
+    
+    for idx, row in tqdm.tqdm(rows_to_split.iterrows(), total=len(rows_to_split), desc="[NRW] Splitting Addresses", ascii=True):
+        street = row['street']
+        hnr = row['housenumber']
+        
+        splits = split_alkis_address_string(street, hnr)
+        
+        for s_new, h_new in splits:
+            entry = row.to_dict()
+            entry['street'] = s_new
+            entry['housenumber'] = h_new
+            new_data.append(entry)
+            
+    split_df = pd.DataFrame(new_data)
+    
+    # Convert back to GeoDataFrame
+    if not split_df.empty:
+        split_gdf = gpd.GeoDataFrame(split_df, geometry='geometry', crs=alkis_df.crs)
+        combined = pd.concat([clean_rows, split_gdf], ignore_index=True)
+        return combined
+    
+    return alkis_df
+
+def clean_nrw_data(alkis_df):
+    """
+    Cleans Köln specific data issues:
+    - Removes 2-letter suffixes from street names (e.g. "Frankenstr. Ju" -> "Frankenstr.")
+    """
+    if 'district' not in alkis_df.columns:
+        return alkis_df
+
+    mask_koeln = alkis_df['district'].str.contains("Köln", case=False, na=False)
+    
+    if not mask_koeln.any():
+        return alkis_df
+        
+    print(f"[NRW] Cleaning {mask_koeln.sum()} rows for Köln...")
+    
+    regex = r'\s+[A-Za-zäöüßÄÖÜ]{2}$'
+    original = alkis_df.loc[mask_koeln, 'street'].astype(str)
+    cleaned = original.str.replace(regex, "", regex=True).str.strip()
+    
+    alkis_df.loc[mask_koeln, 'street'] = cleaned
+    
+    return alkis_df
 
 def main():
-    if not os.path.exists(ALKIS_FILE) or not os.path.exists(OSM_FILE):
-        print("Data files not found")
-        return
-
-    print("Loading datasets...")
-    alkis = gpd.read_parquet(ALKIS_FILE)
-    osm = gpd.read_parquet(OSM_FILE)
+    # STATES_LIST = ["nds", "nrw", "rlp"] 
+    # STATES_LIST = ["nrw", "rlp"] 
+    STATES_LIST = ["nds"] 
     
-    print(f"ALKIS: {len(alkis)}, OSM: {len(osm)}")
+    DATA_DIR = "data"
+    SITE_DIR = "site/public/states"
+    
+    today = datetime.date.today().isoformat()
+    
+    found_any = False
 
-    # Apply Corrections
-    if os.path.exists(CORRECTIONS_FILE):
-        print("Applying manual corrections...")
+    for state in STATES_LIST:
+        alkis_path = os.path.join(DATA_DIR, state, "alkis.parquet")
+        osm_path = os.path.join(DATA_DIR, state, "osm.parquet")
+        
+        if not os.path.exists(alkis_path):
+            print(f"[{state}] ALKIS file not found: {alkis_path}. Skipping.")
+            continue
+        if not os.path.exists(osm_path):
+            print(f"[{state}] OSM file not found: {osm_path}. Skipping.")
+            continue
+            
+        found_any = True
+        print(f"[{state}] Loading data...")
         try:
-            with open(CORRECTIONS_FILE, 'r', encoding='utf-8') as f:
-                corrections = json.load(f)
-            
-            applied_count = 0
-            dropped_count = 0
-            
-            for c in corrections:
-                # Ensure we match string types
-                f_str = str(c.get("from_street", "")).strip()
-                f_hnr = c.get("from_hnr")
-                
-                # Base mask: Street
-                mask = (alkis['street'] == f_str)
-                
-                # Optional: Housenumber
-                if f_hnr is not None and str(f_hnr).strip() != "*":
-                     mask &= (alkis['housenumber'] == str(f_hnr).strip())
-                
-                # Optional: City
-                if "city" in c and c["city"]:
-                     city_val = str(c["city"])
-                     city_mask = pd.Series(False, index=alkis.index)
-                     if 'city' in alkis.columns:
-                         city_mask |= (alkis['city'] == city_val)
-                     if 'district' in alkis.columns:
-                         city_mask |= (alkis['district'] == city_val)
-                         city_mask |= (alkis['district'].str.contains(city_val, case=False, regex=False))
-                     mask &= city_mask
-                
-                if not mask.any():
-                    continue
-                    
-                if c.get("ignore", False):
-                    # Drop
-                    dropped_count += mask.sum()
-                    alkis = alkis[~mask]
-                else:
-                    # Replace
-                    t_str = c.get("to_street")
-                    t_hnr = c.get("to_hnr")
-                    
-                    if t_str:
-                        alkis.loc[mask, 'street'] = str(t_str).strip()
-                    
-                    if t_hnr:
-                        if str(t_hnr).strip() == "*":
-                             pass
-                        else:
-                             alkis.loc[mask, 'housenumber'] = str(t_hnr).strip()
-                             
-                    applied_count += mask.sum()
-            
-            print(f"  Applied {applied_count} corrections. Dropped {dropped_count} addresses.")
-            
+           alkis = gpd.read_parquet(alkis_path)
+           osm = gpd.read_parquet(osm_path)
         except Exception as e:
-            print(f"  Error applying corrections: {e}")
-    else:
-        print("No corrections file found.")
-    
-    # Normalize
-    # Normalize (Vectorized)
-    print("Normalizing addresses (Vectorized)...")
-    
-    # Pre-cleaning to ensure string type
-    alkis['street'] = alkis['street'].astype(str)
-    alkis['housenumber'] = alkis['housenumber'].astype(str)
-    osm['street'] = osm['street'].astype(str)
-    osm['housenumber'] = osm['housenumber'].astype(str)
+           print(f"[{state}] Error loading data: {e}")
+           continue
 
-    # Define replacements
-    replacements = {
-        "straße": "str.",
-        "str.": "str.", # normalize existing abbr
-        "strasse": "str.",
-        "platz": "pl.",
-        # "weg": "weg" # 'weg' -> 'weg' is no-op
-    }
-    
-    # ALKIS Street
-    alkis['street_norm'] = alkis['street'].str.lower().str.replace(r'\s*\(.*?\)', '', regex=True).str.strip()
-    for k, v in replacements.items():
-        alkis['street_norm'] = alkis['street_norm'].str.replace(k, v, regex=False)
+        # NRW Split
+        if state == "nrw":
+            alkis = process_nrw_splits(alkis)
+            alkis = clean_nrw_data(alkis)
+
+        # Generate Keys
+        print(f"[{state}] Generating keys...")
+        # alkis
+        alkis['street'] = alkis['street'].fillna("").astype(str)
+        alkis['housenumber'] = alkis['housenumber'].fillna("").astype(str)
+        alkis['key'] = alkis.apply(lambda row: normalize_key(row['street'], row['housenumber']), axis=1)
         
-    # ALKIS Hnr
-    alkis['hnr_norm'] = alkis['housenumber'].str.lower().str.strip().str.replace(" ", "", regex=False)
-    
-    # OSM Street
-    osm['street_norm'] = osm['street'].str.lower().str.replace(r'\s*\(.*?\)', '', regex=True).str.strip()
-    for k, v in replacements.items():
-        osm['street_norm'] = osm['street_norm'].str.replace(k, v, regex=False)
+        # osm
+        osm['street'] = osm['street'].fillna("").astype(str)
+        osm['housenumber'] = osm['housenumber'].fillna("").astype(str)
+        osm['key'] = osm.apply(lambda row: normalize_key(row['street'], row['housenumber']), axis=1)
 
-    # OSM Hnr
-    osm['hnr_norm'] = osm['housenumber'].str.lower().str.strip().str.replace(" ", "", regex=False)
+        # Align CRS
+        if alkis.crs is not None and osm.crs is not None and not alkis.crs.equals(osm.crs):
+             print(f"[{state}] Reprojecting OSM from {osm.crs} to {alkis.crs}")
+             osm = osm.to_crs(alkis.crs)
 
-    # Keys
-    alkis['key'] = alkis['street_norm'] + " " + alkis['hnr_norm']
-    osm['key'] = osm['street_norm'] + " " + osm['hnr_norm']
-    
-
-    alkis = alkis.to_crs(epsg=25832)
-    osm = osm.to_crs(epsg=25832)
-    
-    # Prepare for merge
-    # track ALKIS indices to mark them as found later
-    alkis['alkis_idx'] = alkis.index
-    
-    # Comparing
-    print("Comparing (Attribute + Spatial)...")
-    
-    # Reproject for distance calc
-    print("  Reprojecting to EPSG:25832...")
-    alkis = alkis.to_crs(epsg=25832)
-    osm = osm.to_crs(epsg=25832)
-    
-    # Prepare for merge
-    alkis['alkis_idx'] = alkis.index
-    found_indices = set()
-    
-    # Chunked Matching to avoid OOM
-    # Common names (Hauptstr 1) explode in merge
-    CHUNK_SIZE = 50000
-    total_chunks = (len(alkis) // CHUNK_SIZE) + 1
-    
-    print(f"  Matching in {total_chunks} chunks...")
-    
-    import numpy as np
-    
-    # Split ALKIS into chunks for processing
-    # We cannot split OSM easily because we need random access by key
-    # But we can filter OSM per chunk
-    
-    for i in range(0, len(alkis), CHUNK_SIZE):
-        chunk = alkis.iloc[i : i + CHUNK_SIZE].copy()
+        # Matching Logic
+        print(f"[{state}] Matching...")
         
-        # Filter OSM to only relevant keys (Optimization)
-        # This reduces the right-side table size significantly for each chunk
-        relevant_keys = chunk['key'].unique()
-        osm_subset = osm[osm['key'].isin(relevant_keys)]
+        alkis = alkis.reset_index(drop=True)
+        alkis['alkis_idx'] = alkis.index
         
-        if osm_subset.empty:
-            continue
+        found_indices = set()
+        
+        # Chunked Matching
+        CHUNK_SIZE = 50000
+        for i in tqdm.tqdm(range(0, len(alkis), CHUNK_SIZE), desc=f"[{state}] Matching", ascii=True):
+            chunk = alkis.iloc[i : i + CHUNK_SIZE].copy()
+            relevant_keys = chunk['key'].unique()
+            osm_subset = osm[osm['key'].isin(relevant_keys)]
             
-        merged = pd.merge(
-            chunk[['key', 'geometry', 'alkis_idx']],
-            osm_subset[['key', 'geometry']],
-            on='key',
-            how='inner',
-            suffixes=('_alkis', '_osm')
-        )
-        
-        if merged.empty:
-            continue
-            
-        # Distances
-        # Use vectorized numpy distance if possible or geopandas
-        # Geopandas is safer for consistency
-        distances = merged['geometry_alkis'].distance(merged['geometry_osm'])
-        
-        valid = merged[distances < 50]
-        found_indices.update(valid['alkis_idx'].unique())
-        
-        # Cleanup
-        del chunk, osm_subset, merged, distances, valid
-        
-    print(f"  Valid Matches: {len(found_indices)} (out of {len(alkis)} ALKIS records)")
-    
-    # Mark in original DF
-    alkis['found_in_osm'] = alkis['alkis_idx'].isin(found_indices)
-    
-    # Revert to 4326 for export
-    print("  Reprojecting back to EPSG:4326...")
-    alkis = alkis.to_crs(epsg=4326)
-    
-    missing = alkis[~alkis['found_in_osm']]
-    print(f"Total Missing: {len(missing)} / {len(alkis)}")
-    
-    # History Tracking
-    # Load existing history
-    history_store = {"global": [], "districts": {}}
-    if os.path.exists(DETAILED_HISTORY_FILE):
-        try:
-            with open(DETAILED_HISTORY_FILE, 'r') as f:
-                history_store = json.load(f)
-                if "districts" not in history_store: history_store["districts"] = {}
-        except:
-            pass # corrupted or old format
-
-    # get the snaphot date
-    reader = osmium.io.Reader(PBF_FILE)
-    export_date = reader.header().get("osmosis_replication_timestamp")
-    print(f"OSM Snapshot Timestamp: {export_date}")
-    
-    # Global Stat
-    global_stat = {
-        "date": export_date,
-        "alkis": len(alkis),
-        "osm": len(osm),
-        "missing": len(missing),
-        "coverage": round((len(alkis) - len(missing)) / len(alkis) * 100, 2)
-    }
-    
-    # Update global (avoid dupes for today)
-    # Check last entry
-    if not history_store["global"] or history_store["global"][-1]["date"] != export_date:
-        history_store["global"].append(global_stat)
-    else:
-        history_store["global"][-1] = global_stat
-
-    # Group by District
-    os.makedirs(STATS_DIR, exist_ok=True)
-    
-    # Make sure 'district' column exists (it should after updated extraction)
-    if 'district' not in alkis.columns:
-        print("Warning: No 'district' column in ALKIS data. Saving global diff only.")
-        alkis['district'] = 'Global'
-        
-    districts = alkis['district'].unique()
-    district_list = []
-    
-    for district in districts:
-        print(f"Processing {district}...")
-        district_alkis = alkis[alkis['district'] == district]
-        district_missing = district_alkis[~district_alkis['found_in_osm']]
-        
-        # Stats
-        d_stats = {
-            "name": district,
-            "total": len(district_alkis),
-            "missing": len(district_missing),
-            "coverage": round((len(district_alkis) - len(district_missing)) / len(district_alkis) * 100, 1)
-        }
-        district_list.append(d_stats)
-        
-        # Update District History
-        d_hist_entry = {
-            "date": export_date,
-            "total": d_stats["total"],
-            "missing": d_stats["missing"],
-            "coverage": d_stats["coverage"]
-        }
-        
-        if district not in history_store["districts"]:
-            history_store["districts"][district] = []
-            
-        d_hist = history_store["districts"][district]
-        if not d_hist or d_hist[-1]["date"] != export_date:
-            d_hist.append(d_hist_entry)
-        else:
-            d_hist[-1] = d_hist_entry
-        
-        # Export GeoJSON
-        export_cols = ['street', 'housenumber', 'geometry']
-        missing_export = district_missing[export_cols]
-        
-        if missing_export.crs != "EPSG:4326":
-            missing_export = missing_export.to_crs("EPSG:4326")
-            
-        out_path = os.path.join(STATS_DIR, f"{district}.geojson")
-        if len(missing_export) > 0:
-            try:
-                missing_export.to_file(out_path, driver="GeoJSON")
-            except Exception as e:
-                print(f"Error saving {district}: {e}")
-        else:
-            # Create empty feature collection
-            with open(out_path, 'w') as f:
-                json.dump({"type": "FeatureCollection", "features": []}, f)
+            if osm_subset.empty: continue
                 
-    # Save Detailed History
-    with open(DETAILED_HISTORY_FILE, 'w') as f:
-        json.dump(history_store, f, indent=2)
+            merged = pd.merge(
+                chunk[['key', 'geometry', 'alkis_idx']],
+                osm_subset[['key', 'geometry']],
+                on='key',
+                how='inner',
+                suffixes=('_alkis', '_osm')
+            )
+            
+            if merged.empty: continue
+                
+            distances = merged['geometry_alkis'].distance(merged['geometry_osm'])
+            valid = merged[distances < 150] # allow 150m distance because OSM node may not be aligned with Alkis node
+            found_indices.update(valid['alkis_idx'].unique())
+            
+        print(f"[{state}] Valid Matches: {len(found_indices)} / {len(alkis)}")
         
-    # Save list of districts for frontend selector
-    district_list.sort(key=lambda x: x['name'])
-    with open(os.path.join(OUTPUT_DIR, "districts.json"), 'w') as f:
-        json.dump(district_list, f, indent=2)
+        alkis['found_in_osm'] = alkis['alkis_idx'].isin(found_indices)
         
-    print("Comparison complete.")
+        # Export preparation
+        if alkis.crs != "EPSG:4326":
+            alkis = alkis.to_crs(epsg=4326)
+        
+        missing = alkis[~alkis['found_in_osm']]
+        
+        state_total = len(alkis)
+        state_missing = len(missing)
+        state_osm_count = len(osm)
+        
+        # Directories
+        state_out_dir = os.path.join(SITE_DIR, state)
+        districts_dir = os.path.join(state_out_dir, "districts")
+        os.makedirs(districts_dir, exist_ok=True)
+        
+        history_file = os.path.join(state_out_dir, f"{state}_history.json")
+        districts_file = os.path.join(state_out_dir, f"{state}_districts.json")
+        
+        # Load History
+        history_store = {"global": [], "districts": {}}
+        if os.path.exists(history_file):
+            try:
+                with open(history_file, 'r') as f:
+                    history_store = json.load(f)
+            except: pass
+
+        # Districts Processing
+        if 'district' not in alkis.columns:
+            alkis['district'] = f"Unknown_{state}"
+        
+        districts = alkis['district'].unique()
+        
+        district_list = []
+        
+        for district in tqdm.tqdm(districts, desc=f"[{state}] Processing Districts", ascii=True):
+            district_alkis = alkis[alkis['district'] == district]
+            district_missing = district_alkis[~district_alkis['found_in_osm']]
+            
+            d_total = len(district_alkis)
+            d_missing = len(district_missing)
+            d_coverage = round((d_total - d_missing) / d_total * 100, 1) if d_total > 0 else 100.0
+            
+            unique_name = f"{district}" 
+            
+            clean_name = "".join([c if c.isalnum() else "_" for c in str(district)])
+            out_filename = f"{clean_name}.geojson" 
+            
+            d_stats = {
+                "name": unique_name,
+                "state": state,
+                "district": district,
+                "total": d_total,
+                "missing": d_missing,
+                "coverage": d_coverage,
+                "path": f"states/{state}/districts/{out_filename}",
+                "filename": out_filename
+            }
+            district_list.append(d_stats)
+            
+            # History
+            hist_key = unique_name
+            d_hist_entry = {
+                "date": today,
+                "total": d_total,
+                "missing": d_missing,
+                "coverage": d_coverage
+            }
+            
+            if hist_key not in history_store["districts"]:
+                history_store["districts"][hist_key] = []
+            
+            d_hist = history_store["districts"][hist_key]
+            if not d_hist or d_hist[-1]["date"] != today:
+                d_hist.append(d_hist_entry)
+            else:
+                d_hist[-1] = d_hist_entry
+                
+            # GeoJSON Export
+            missing_export = district_missing[['street', 'housenumber', 'geometry']]
+            
+            out_path = os.path.join(districts_dir, out_filename)
+            if len(missing_export) > 0:
+                missing_export.to_file(out_path, driver="GeoJSON")
+            else:
+                 with open(out_path, 'w') as f:
+                    json.dump({"type": "FeatureCollection", "features": []}, f)
+
+        # State Global Stats
+        global_coverage = round((state_total - state_missing) / state_total * 100, 2) if state_total > 0 else 100.0
+        g_entry = {
+             "date": today,
+             "alkis": state_total,
+             "osm": state_osm_count,
+             "missing": state_missing,
+             "coverage": global_coverage
+        }
+        
+        if not history_store["global"] or history_store["global"][-1]["date"] != today:
+            history_store["global"].append(g_entry)
+        else:
+            history_store["global"][-1] = g_entry
+            
+        # Write State Files
+        with open(history_file, 'w') as f:
+            json.dump(history_store, f, indent=2)
+            
+        district_list.sort(key=lambda x: x['name'])
+        with open(districts_file, 'w') as f:
+            json.dump(district_list, f, indent=2)
+
+    if not found_any:
+        print("No data processed.")
+    else:
+        print("Comparison complete.")
 
 if __name__ == "__main__":
     main()
