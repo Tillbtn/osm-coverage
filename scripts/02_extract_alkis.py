@@ -279,7 +279,7 @@ def load_kreise_mapping(csv_path):
 def process_rlp(directory):
     results = []
     
-    mapping_file = os.path.join(DATA_DIR, "04-kreise.csv")
+    mapping_file = os.path.join(DATA_DIR, "rlp", "rlp-districts-mapping.csv")
     kreise_map = load_kreise_mapping(mapping_file)
     print(f"Loaded {len(kreise_map)} mappings from {mapping_file}")
 
@@ -288,7 +288,6 @@ def process_rlp(directory):
         try:
             gdf = gpd.read_file(gpath, engine='pyogrio')
             
-            # RLP GeoJSON often contains UTM coordinates but might be read as WGS84 or have no CRS
             # Check for UTM-like coordinates (X > 180 is a strong signal it's not degrees)
             if not gdf.empty:
                 min_x = gdf.total_bounds[0]
@@ -307,7 +306,6 @@ def process_rlp(directory):
                 # robust string conversion: Handle potential float/int representation
                 raw_codes = gdf[d_col].astype(str).str.replace(r'\.0$', '', regex=True)
                 # Pad with zeros if necessary (though usually RLP gmdschl are 8 digits starting with 07...)
-                # The user example was '07337059', so padding to 8 ensures usage of leading zero if lost
                 raw_codes = raw_codes.str.zfill(8) 
                 
                 district_codes = raw_codes.str[:5]
@@ -338,8 +336,8 @@ def process_rlp(directory):
 
 def main():
     process_state("NDS", DIR_NDS, process_lgln)
-    # process_state("NRW", DIR_NRW, process_nrw)
-    # process_state("RLP", DIR_RLP, process_rlp)
+    process_state("NRW", DIR_NRW, process_nrw)
+    process_state("RLP", DIR_RLP, process_rlp)
 
 if __name__ == "__main__":
     main()
