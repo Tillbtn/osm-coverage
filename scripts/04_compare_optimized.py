@@ -122,6 +122,53 @@ def clean_nrw_data(alkis_df):
     
     return alkis_df
 
+
+def apply_corrections(alkis_df, corrections_file, state):
+    """
+    Applies corrections from a JSON file to the ALKIS dataframe.
+    """
+    if not os.path.exists(corrections_file):
+        return alkis_df
+        
+    print(f"[{state}] Applying corrections from {corrections_file}...")
+    try:
+        with open(corrections_file, 'r', encoding='utf-8') as f:
+            corrections = json.load(f)
+    except Exception as e:
+        print(f"[{state}] Error loading corrections file: {e}")
+        return alkis_df
+        
+    count = 0
+    for corr in corrections:
+        from_street = corr.get("from_street")
+        if not from_street: continue
+        
+        mask = alkis_df['street'] == from_street
+        
+        if "city" in corr:
+            # map city to district if column exists
+            if 'district' in alkis_df.columns:
+                 mask &= (alkis_df['district'] == corr["city"])
+        
+        if "from_housenumber" in corr:
+             mask &= (alkis_df['housenumber'] == corr["from_housenumber"])
+             
+        if not mask.any():
+            continue
+            
+        rows_affected = mask.sum()
+        count += rows_affected
+        
+        # Apply changes
+        if "to_street" in corr:
+            alkis_df.loc[mask, 'street'] = corr["to_street"]
+            
+        if "to_housenumber" in corr:
+            alkis_df.loc[mask, 'housenumber'] = corr["to_housenumber"]
+
+    print(f"[{state}] Applied corrections to {count} rows.")
+    return alkis_df
+
 def main():
     # STATES_LIST = ["nds", "nrw", "rlp"] 
     # STATES_LIST = ["nrw", "rlp"] 
@@ -158,6 +205,10 @@ def main():
         if state == "nrw":
             alkis = process_nrw_splits(alkis)
             alkis = clean_nrw_data(alkis)
+
+        # Apply Generic Corrections
+        corrections_file = os.path.join(SITE_DIR, state, f"{state}_alkis_corrections.json")
+        alkis = apply_corrections(alkis, corrections_file, state)
 
         # Generate Keys
         print(f"[{state}] Generating keys...")
