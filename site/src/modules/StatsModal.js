@@ -2,10 +2,11 @@
 import { initHistoryChart, updateChart, updateComparisonChart, renderHistoryTable, calculateGlobalDiff } from './ui.js';
 
 export class StatsModal {
-    constructor(districtsData, historyData, onSelectDistrict) {
+    constructor(districtsData, historyData, onSelectDistrict, stateName = "Niedersachsen") {
         this.districtsData = districtsData;
         this.historyData = historyData;
         this.onSelectDistrict = onSelectDistrict;
+        this.stateName = stateName;
 
         this.sortCol = 'name';
         this.sortAsc = true;
@@ -33,7 +34,7 @@ export class StatsModal {
                     <div style="margin-bottom: 10px;">
                         <label for="statsChartSelect">Anzeige für:</label>
                         <select id="statsChartSelect">
-                            <option value="global">Niedersachsen (gesamt)</option>
+                            <option value="global">${this.stateName} (gesamt)</option>
                             <!-- Options populated by JS -->
                         </select>
                     </div>
