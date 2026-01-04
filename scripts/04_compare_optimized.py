@@ -170,9 +170,7 @@ def apply_corrections(alkis_df, corrections_file, state):
     return alkis_df
 
 def main():
-    # STATES_LIST = ["nds", "nrw", "rlp"] 
-    # STATES_LIST = ["nrw", "rlp"] 
-    STATES_LIST = ["nds"] 
+    STATES_LIST = ["nds", "nrw", "rlp"] 
     
     DATA_DIR = "data"
     SITE_DIR = "site/public/states"
