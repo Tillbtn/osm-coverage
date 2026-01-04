@@ -7,8 +7,8 @@ services:
     ports:
       - "8080:80"
     volumes:
-      # Mount the generated data into a subdirectory that we alias in Nginx
-      - generated_data:/usr/share/nginx/html/data_mount:ro
+      # Mount the generated data from host folder (for easy access/editing)
+      - ../public_data:/usr/share/nginx/html/data_mount:ro
       # Persist Nginx logs to host (in project root logs/)
       - ../logs:/var/log/nginx
     restart: unless-stopped
@@ -20,8 +20,8 @@ services:
     container_name: osm_cover_worker
     volumes:
       - ../data:/app/data
-      # Worker writes to site/public, which we persist
-      - generated_data:/app/site/public
+      # Worker writes to site/public, which we persist on host
+      - ../public_data:/app/site/public
       # Mount scripts for easier dev/updates without rebuild
       - ../scripts:/app/scripts
       # Persist backups (in project root backups/)
@@ -29,6 +29,3 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
     restart: "no"
-
-volumes:
-  generated_data:
