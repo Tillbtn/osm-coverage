@@ -12,6 +12,8 @@ services:
       # Persist Nginx logs to host (in project root logs/)
       - ../logs:/var/log/nginx
     restart: unless-stopped
+    environment:
+      - TZ=Europe/Berlin
 
   worker:
     build:
