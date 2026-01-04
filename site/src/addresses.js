@@ -44,8 +44,8 @@ const initialLng = parseFloat(document.body.dataset.centerLng) || config.center[
 const initialZoom = parseInt(document.body.dataset.zoom) || config.zoom;
 
 Promise.all([
-    fetchDistricts(districtsUrl),
-    fetchHistory(historyUrl)
+    state ? fetchDistricts(districtsUrl) : Promise.resolve([]),
+    state ? fetchHistory(historyUrl) : Promise.resolve({ global: [], districts: {} })
 ]).then(([districts, history]) => {
     if (!state) {
         districts = [];
