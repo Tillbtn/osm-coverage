@@ -69,22 +69,22 @@ def split_alkis_address_string(original_street, original_hnr_string):
             
     return results
 
-def process_nrw_splits(alkis_df):
+def process_complex_addresses(alkis_df, state_name):
     """
-    Splits rows with commas in housenumber for NRW.
+    Splits rows with commas in housenumber.
     """
     mask = alkis_df['housenumber'].astype(str).str.contains(r'[,;]', regex=True)
     if not mask.any():
         return alkis_df
         
-    print(f"[NRW] Found {mask.sum()} complex address rows. Splitting...")
+    print(f"[{state_name}] Found {mask.sum()} complex address rows. Splitting...")
     
     rows_to_split = alkis_df[mask]
     clean_rows = alkis_df[~mask]
     
     new_data = []
     
-    for idx, row in tqdm.tqdm(rows_to_split.iterrows(), total=len(rows_to_split), desc="[NRW] Splitting Addresses", ascii=True):
+    for idx, row in tqdm.tqdm(rows_to_split.iterrows(), total=len(rows_to_split), desc=f"[{state_name}] Splitting Addresses", ascii=True):
         street = row['street']
         hnr = row['housenumber']
         
@@ -206,9 +206,12 @@ def main():
            print(f"[{state}] Error loading data: {e}")
            continue
 
-        # NRW Split
+        # Address Splitting
+        if state in ["nrw"]:
+            alkis = process_complex_addresses(alkis, state)
+
+        # NRW Specific Cleaning
         if state == "nrw":
-            alkis = process_nrw_splits(alkis)
             alkis = clean_nrw_data(alkis)
 
         # Apply Generic Corrections
