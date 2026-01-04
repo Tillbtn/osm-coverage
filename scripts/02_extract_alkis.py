@@ -277,62 +277,50 @@ def load_kreise_mapping(csv_path):
     return mapping
 
 def process_rlp(directory):
-    results = []
+    csv_path = os.path.join(directory, "HAUSKOORDINATEN_RP", "HAUSKOORDINATEN_RP_hk.csv")
     
-    mapping_file = os.path.join(DATA_DIR, "rlp", "rlp-districts-mapping.csv")
-    kreise_map = load_kreise_mapping(mapping_file)
-    print(f"Loaded {len(kreise_map)} mappings from {mapping_file}")
-
-    geojsons = glob.glob(os.path.join(directory, "*.geojson"))
-    for gpath in tqdm.tqdm(geojsons, desc="Processing RLP chunks"):
-        try:
-            gdf = gpd.read_file(gpath, engine='pyogrio')
-            
-            # Check for UTM-like coordinates (X > 180 is a strong signal it's not degrees)
-            if not gdf.empty:
-                min_x = gdf.total_bounds[0]
-                if min_x > 180:
-                     # It's likely UTM Zone 32N (EPSG:25832)
-                     # Force set CRS
-                     gdf.set_crs(epsg=25832, allow_override=True, inplace=True)
-
-            # Determine district BEFORE normalization because normalize_columns drops extra columns
-            district_series = None
-            cols_lower = gdf.columns.str.lower()
-            
-            if 'gmdschl' in cols_lower:
-                d_col = gdf.columns[cols_lower == 'gmdschl'][0]
-                # Extract first 5 digits
-                # robust string conversion: Handle potential float/int representation
-                raw_codes = gdf[d_col].astype(str).str.replace(r'\.0$', '', regex=True)
-                # Pad with zeros if necessary (though usually RLP gmdschl are 8 digits starting with 07...)
-                raw_codes = raw_codes.str.zfill(8) 
-                
-                district_codes = raw_codes.str[:5]
-                # Map to names
-                district_series = district_codes.map(kreise_map)
-                
-                district_series = district_series.fillna(district_codes) # Fallback to code if name not found 
-            elif 'gemeinde' in cols_lower:
-                d_col = gdf.columns[cols_lower == 'gemeinde'][0]
-                # Try to use this as is, or same mapping
-                district_series = gdf[d_col].astype(str)
-
-            gdf = normalize_columns(gdf)
-            if gdf is not None:
-                if district_series is not None:
-                    gdf['district'] = district_series
-                else:
-                    gdf['district'] = 'RLP_Chunk' # Todo: Map by spatial join if needed
-                
-                
-                gdf['state'] = 'RLP'
-                results.append(gdf)
-            else:
-                pass
-        except Exception as e: 
-            pass
-    return results
+    if not os.path.exists(csv_path):
+        print(f"[RLP] CSV file not found at {csv_path}")
+        return []
+        
+    print(f"[RLP] Reading CSV from {csv_path}...")
+    
+    try:
+        # Columns: nba;oid;qua;landschl;land;regbezschl;regbez;kreisschl;kreis;gmdschl;gmd;ottschl;ott;strschl;str;hnr;adz;zone;ostwert;nordwert
+        df = pd.read_csv(csv_path, sep=';', dtype=str)
+        
+        df = df.dropna(subset=['str', 'hnr', 'ostwert', 'nordwert'])
+        
+        df['housenumber'] = df['hnr'] + df['adz'].fillna('')
+        
+        df = df.rename(columns={
+            'str': 'street',
+            'gmd': 'district',
+            'plz': 'postcode'
+        })
+        
+        df['postcode'] = None
+        df['city'] = df['district']
+        
+        x = pd.to_numeric(df['ostwert'], errors='coerce')
+        y = pd.to_numeric(df['nordwert'], errors='coerce')
+        
+        gdf = gpd.GeoDataFrame(
+            df[['street', 'housenumber', 'postcode', 'city', 'district']],
+            geometry=gpd.points_from_xy(x, y),
+            crs="EPSG:25832"
+        )
+        
+        # Remove invalid geometries
+        gdf = gdf[gdf.geometry.is_valid & ~gdf.geometry.is_empty]
+        
+        gdf['state'] = 'RLP'
+        
+        return [gdf]
+        
+    except Exception as e:
+        print(f"[RLP] Error processing CSV: {e}")
+        return []
 
 def main():
     process_state("NDS", DIR_NDS, process_lgln)

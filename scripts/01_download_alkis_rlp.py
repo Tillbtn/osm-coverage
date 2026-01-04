@@ -1,86 +1,60 @@
 import os
 import requests
-import json
+import zipfile
+import shutil
 import tqdm
 
 # Configuration
-WFS_URL = "https://geo5.service24.rlp.de/wfs/alkis_rp.fcgi"
-LAYER = "ave:GebaeudeBauwerk"
+DOWNLOAD_URL = "https://geobasis-rlp.de/data/hk/current/zip/HAUSKOORDINATEN_RP.zip"
 DATA_DIR = "data"
-ALKIS_DIR = os.path.join(DATA_DIR, "rlp", "alkis")
-PAGE_SIZE = 10000
-
-def download_chunk(start_index, chunk_id):
-    params = {
-        "SERVICE": "WFS",
-        "VERSION": "2.0.0",
-        "REQUEST": "GetFeature",
-        "TYPENAMES": LAYER,
-        "STARTINDEX": start_index,
-        "COUNT": PAGE_SIZE,
-        "OUTPUTFORMAT": "application/json; subtype=geojson"
-    }
-    
-    try:
-        response = requests.get(WFS_URL, params=params, stream=True)
-        response.raise_for_status()
-        
-        # Check if it's a valid GeoJSON response or XML error
-        if 'xml' in response.headers.get('Content-Type', ''):
-            content = response.content
-            if b"ExceptionReport" in content:
-                print(f"Error fetching chunk {chunk_id}: {content}")
-                return 0
-        
-        filename = f"alkis_rlp_chunk_{chunk_id:04d}.geojson"
-        dest_path = os.path.join(ALKIS_DIR, filename)
-        
-        with open(dest_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-        
-        return 1
-        
-    except Exception as e:
-        print(f"Failed to download chunk {chunk_id}: {e}")
-        return 0
-
-def check_feature_count(path):
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            return len(data.get('features', []))
-    except:
-        return 0
+RLP_ALKIS_DIR = os.path.join(DATA_DIR, "rlp", "alkis")
+TARGET_DIR = os.path.join(RLP_ALKIS_DIR, "HAUSKOORDINATEN_RP")
 
 def main():
-    os.makedirs(ALKIS_DIR, exist_ok=True)
+    os.makedirs(RLP_ALKIS_DIR, exist_ok=True)
     
-    start_index = 0
-    chunk_id = 0
+    zip_filename = "HAUSKOORDINATEN_RP.zip"
+    zip_path = os.path.join(RLP_ALKIS_DIR, zip_filename)
     
-    print(f"Starting WFS download for layer {LAYER}...")
-    
-    while True:
-        print(f"Downloading chunk {chunk_id} (Start: {start_index})...")
-        success = download_chunk(start_index, chunk_id)
+    print(f"Downloading {DOWNLOAD_URL}...")
+    try:
+        # Disable SSL verification to handle cert issues
+        requests.packages.urllib3.disable_warnings()
+        response = requests.get(DOWNLOAD_URL, stream=True, verify=False)
+        response.raise_for_status()
         
-        if not success:
-            print("Download failed, stopping.")
-            break
+        total_size = int(response.headers.get('content-length', 0))
+        block_size = 1024
+        
+        with open(zip_path, 'wb') as f, tqdm.tqdm(
+            desc="Downloading",
+            total=total_size,
+            unit='iB',
+            unit_scale=True,
+            unit_divisor=1024,
+        ) as bar:
+            for data in response.iter_content(block_size):
+                size = f.write(data)
+                bar.update(size)
+                
+        print("Download complete.")
+        
+        print(f"Extracting to {TARGET_DIR}...")
+        if os.path.exists(TARGET_DIR):
+             shutil.rmtree(TARGET_DIR)
+        os.makedirs(TARGET_DIR, exist_ok=True)
+
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(TARGET_DIR)
             
-        filename = f"alkis_rlp_chunk_{chunk_id:04d}.geojson"
-        path = os.path.join(ALKIS_DIR, filename)
+        print("Extraction complete.")
         
-        count = check_feature_count(path)
-        print(f"Chunk {chunk_id} contained {count} features.")
+        # Cleanup ZIP
+        os.remove(zip_path)
+        print("Removed ZIP file.")
         
-        if count < PAGE_SIZE:
-            print("Reached end of data.")
-            break
-            
-        start_index += count
-        chunk_id += 1
+    except Exception as e:
+        print(f"Error executing download/extraction: {e}")
 
 if __name__ == "__main__":
     main()

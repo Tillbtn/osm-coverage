@@ -59,7 +59,7 @@ export class StatsModal {
 
                 <div id="comparisonChartSection" class="stats-section">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                        <h3>Top 10 Landkreise <span id="globalDiffDisplay" style="font-size: 0.8em; color: #666; margin-left: 10px;"></span></h3>
+                        <h3>Top 10<span id="globalDiffDisplay" style="font-size: 0.8em; color: #666; margin-left: 10px;"></span></h3>
                         
                         <select id="compChartMode" style="padding: 5px;">
                             <option value="top1">1 Tag</option>
