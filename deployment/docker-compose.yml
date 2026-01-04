@@ -28,7 +28,7 @@ services:
       - ../backups:/app/backups
     environment:
       - PYTHONUNBUFFERED=1
-    restart: unless-stopped
+    restart: "no"
 
 volumes:
   generated_data:
