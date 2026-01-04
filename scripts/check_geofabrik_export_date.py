@@ -4,17 +4,27 @@ import re
 import json
 import os
 import sys
-from datetime import datetime
-from email.utils import parsedate_to_datetime
 
-# Constants
-GEOFABRIK_URL = "https://download.geofabrik.de/europe/germany/niedersachsen.html"
-DETAILED_HISTORY_PATH = os.path.join("site", "public", "detailed_history.json")
+# Configuration matches 03_import_pbf_optimized.py
+STATES = {
+    "nds": {
+        "url": "https://download.geofabrik.de/europe/germany/niedersachsen.html",
+        "history_file": os.path.join("site", "public", "states", "nds", "nds_history.json")
+    },
+    "nrw": {
+        "url": "https://download.geofabrik.de/europe/germany/nordrhein-westfalen.html",
+        "history_file": os.path.join("site", "public", "states", "nrw", "nrw_history.json")
+    },
+    "rlp": {
+        "url": "https://download.geofabrik.de/europe/germany/rheinland-pfalz.html",
+        "history_file": os.path.join("site", "public", "states", "rlp", "rlp_history.json")
+    }
+}
 
-def get_remote_date():
+def get_remote_date(url):
     """Fetches the Geofabrik page and extracts the timestamp."""
     try:
-        response = requests.get(GEOFABRIK_URL, timeout=10)
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
         
         # Regex to find: "contains all OSM data up to 2025-12-14T21:21:45Z"
@@ -22,54 +32,58 @@ def get_remote_date():
         if match:
             return match.group(1)
         else:
-            print("Error: Could not find timestamp pattern on Geofabrik page.")
+            print(f"[{url}] Error: Could not find timestamp pattern.")
             return None
     except Exception as e:
-        print(f"Error fetching Geofabrik page: {e}")
+        print(f"[{url}] Error fetching Geofabrik page: {e}")
         return None
 
-def get_local_date():
-    """Reads the last processed date from detailed_history.json."""
-    if not os.path.exists(DETAILED_HISTORY_PATH):
-        print(f"Local history not found at {DETAILED_HISTORY_PATH}. Assuming clean slate.")
+def get_local_date(history_path):
+    """Reads the last processed date from the state history file."""
+    if not os.path.exists(history_path):
         return None
 
     try:
-        with open(DETAILED_HISTORY_PATH, "r") as f:
+        with open(history_path, "r") as f:
             data = json.load(f)
             global_hist = data.get("global", [])
             if global_hist:
                 return global_hist[-1].get("date")
     except Exception as e:
-        print(f"Error reading local history: {e}")
+        print(f"Error reading local history {history_path}: {e}")
         
     return None
 
 def main():
-    remote_date_str = get_remote_date()
-    if not remote_date_str:
-        # If we can't get remote date, be safe and assume no update (or should we fail open?)
-        # User goal: avoid unnecessary work. If we fail to check, maybe don't update?
-        # But failing effectively requires manual intervention.
-        # Let's say: Error -> exit 1 (No update/Error)
-        sys.exit(1)
-
-    local_date_str = get_local_date()
+    update_needed = False
     
-    print(f"Remote Date: {remote_date_str}")
-    print(f"Local Date:  {local_date_str}")
+    print("Checking for updates...")
+    
+    for state_key, config in STATES.items():
+        remote_date = get_remote_date(config["url"])
+        local_date = get_local_date(config["history_file"])
+        
+        print(f"[{state_key}] Remote: {remote_date} | Local: {local_date}")
+        
+        if not remote_date:
+            print(f"[{state_key}] Warning: Could not fetch remote date. Skipping check.")
+            continue
+            
+        if local_date is None:
+            print(f"[{state_key}] No local history. Update needed.")
+            update_needed = True
+        elif remote_date > local_date:
+            print(f"[{state_key}] New data available.")
+            update_needed = True
+        else:
+            print(f"[{state_key}] Up to date.")
 
-    if local_date_str is None:
-        print("No local history found. Update required.")
-        sys.exit(0)
-
-    # String comparison for ISO 8601 is valid and sufficient
-    if remote_date_str > local_date_str:
-        print("Remote is newer. Update required.")
-        sys.exit(0)
+    if update_needed:
+        print("Update required for at least one state.")
+        sys.exit(0) # 0 means "Success, proceed" in run_updates.sh logic
     else:
-        print("Remote is older or same. No update needed.")
-        sys.exit(1)
+        print("All states up to date.")
+        sys.exit(1) # 1 means "Failure/No Update"
 
 if __name__ == "__main__":
     main()

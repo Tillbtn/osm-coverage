@@ -23,6 +23,13 @@ def normalize_key(street, hnr):
     h = str(hnr).lower().replace(" ", "")
     return f"{s}{h}"
 
+STATES = {
+    "nds": { "pbf_file": "niedersachsen-latest.osm.pbf" },
+    "nrw": { "pbf_file": "nordrhein-westfalen-latest.osm.pbf" },
+    "rlp": { "pbf_file": "rheinland-pfalz-latest.osm.pbf" }
+}
+
+
 def split_alkis_address_string(original_street, original_hnr_string):
     """
     Parses "Straße 1, 2, Weg 3" into [("Straße", "1"), ("Straße", "2"), ("Weg", "3")]
@@ -290,6 +297,19 @@ def main():
         if 'district' not in alkis.columns:
             alkis['district'] = f"Unknown_{state}"
         
+        # Get OSM Snapshot Timestamp from PBF
+        pbf_path = os.path.join("data", state, "osm", STATES[state]["pbf_file"])
+        export_date = today 
+        try:
+             import osmium
+             reader = osmium.io.Reader(pbf_path)
+             header_ts = reader.header().get("osmosis_replication_timestamp")
+             reader.close()
+             if header_ts:
+                 export_date = str(header_ts)
+        except Exception as e:
+            print(f"[{state}] Warning: Could not read PBF timestamp: {e}")
+
         districts = alkis['district'].unique()
         
         district_list = []
@@ -322,7 +342,7 @@ def main():
             # History
             hist_key = unique_name
             d_hist_entry = {
-                "date": today,
+                "date": export_date,
                 "total": d_total,
                 "missing": d_missing,
                 "coverage": d_coverage
@@ -332,7 +352,7 @@ def main():
                 history_store["districts"][hist_key] = []
             
             d_hist = history_store["districts"][hist_key]
-            if not d_hist or d_hist[-1]["date"] != today:
+            if not d_hist or d_hist[-1]["date"] != export_date:
                 d_hist.append(d_hist_entry)
             else:
                 d_hist[-1] = d_hist_entry
@@ -350,14 +370,14 @@ def main():
         # State Global Stats
         global_coverage = round((state_total - state_missing) / state_total * 100, 2) if state_total > 0 else 100.0
         g_entry = {
-             "date": today,
+             "date": export_date,
              "alkis": state_total,
              "osm": state_osm_count,
              "missing": state_missing,
              "coverage": global_coverage
         }
         
-        if not history_store["global"] or history_store["global"][-1]["date"] != today:
+        if not history_store["global"] or history_store["global"][-1]["date"] != export_date:
             history_store["global"].append(g_entry)
         else:
             history_store["global"][-1] = g_entry
