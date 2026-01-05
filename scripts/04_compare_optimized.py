@@ -206,6 +206,10 @@ def main():
            print(f"[{state}] Error loading data: {e}")
            continue
 
+        # Apply Generic Corrections
+        corrections_file = os.path.join(SITE_DIR, state, f"{state}_alkis_corrections.json")
+        alkis = apply_corrections(alkis, corrections_file, state)
+
         # Address Splitting
         if state in ["nrw"]:
             alkis = process_complex_addresses(alkis, state)
@@ -213,10 +217,6 @@ def main():
         # NRW Specific Cleaning
         if state == "nrw":
             alkis = clean_nrw_data(alkis)
-
-        # Apply Generic Corrections
-        corrections_file = os.path.join(SITE_DIR, state, f"{state}_alkis_corrections.json")
-        alkis = apply_corrections(alkis, corrections_file, state)
 
         # Generate Keys
         print(f"[{state}] Generating keys...")
