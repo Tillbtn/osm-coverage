@@ -30,104 +30,7 @@ STATES = {
 }
 
 
-def split_alkis_address_string(original_street, original_hnr_string):
-    """
-    Parses "Straße 1, 2, Weg 3" into [("Straße", "1"), ("Straße", "2"), ("Weg", "3")]
-    """
-    if not isinstance(original_hnr_string, str): 
-         return [(original_street, original_hnr_string)]
-         
-    original_hnr_string = original_hnr_string.replace(';', ',')
 
-    if ',' not in original_hnr_string:
-        return [(original_street, original_hnr_string)]
-        
-    parts = original_hnr_string.split(',')
-    results = []
-    
-    current_street = original_street
-    
-    street_pattern = re.compile(r'^\s*([^\d].*?)\s+([0-9].*)$')
-    
-    first = True
-    for part in parts:
-        part = part.strip()
-        if not part: continue
-        
-        if first:
-            results.append((current_street, part))
-            first = False
-            continue
-                
-        match = street_pattern.match(part)
-        if match:
-            current_street = match.group(1)
-            hnr = match.group(2)
-            results.append((current_street, hnr))
-        else:
-            results.append((current_street, part))
-            
-    return results
-
-def process_complex_addresses(alkis_df, state_name):
-    """
-    Splits rows with commas in housenumber.
-    """
-    mask = alkis_df['housenumber'].astype(str).str.contains(r'[,;]', regex=True)
-    if not mask.any():
-        return alkis_df
-        
-    print(f"[{state_name}] Found {mask.sum()} complex address rows. Splitting...")
-    
-    rows_to_split = alkis_df[mask]
-    clean_rows = alkis_df[~mask]
-    
-    new_data = []
-    
-    for idx, row in tqdm.tqdm(rows_to_split.iterrows(), total=len(rows_to_split), desc=f"[{state_name}] Splitting Addresses", ascii=True):
-        street = row['street']
-        hnr = row['housenumber']
-        
-        splits = split_alkis_address_string(street, hnr)
-        
-        for s_new, h_new in splits:
-            entry = row.to_dict()
-            entry['street'] = s_new
-            entry['housenumber'] = h_new
-            new_data.append(entry)
-            
-    split_df = pd.DataFrame(new_data)
-    
-    # Convert back to GeoDataFrame
-    if not split_df.empty:
-        split_gdf = gpd.GeoDataFrame(split_df, geometry='geometry', crs=alkis_df.crs)
-        combined = pd.concat([clean_rows, split_gdf], ignore_index=True)
-        return combined
-    
-    return alkis_df
-
-def clean_nrw_data(alkis_df):
-    """
-    Cleans Köln specific data issues:
-    - Removes 2-letter suffixes from street names (e.g. "Frankenstr. Ju" -> "Frankenstr.")
-    """
-    if 'district' not in alkis_df.columns:
-        return alkis_df
-
-    mask_koeln = alkis_df['district'].str.contains("Köln", case=False, na=False)
-    
-    if not mask_koeln.any():
-        return alkis_df
-        
-    print(f"[NRW] Cleaning {mask_koeln.sum()} rows for Köln...")
-    
-    regex = r'\s+[A-Za-zäöüßÄÖÜ]{2}$'
-    original = alkis_df.loc[mask_koeln, 'street'].astype(str)
-    cleaned = original.str.replace(regex, "", regex=True).str.strip()
-    
-    alkis_df.loc[mask_koeln, 'street'] = cleaned
-    
-    return alkis_df
 
 
 def apply_corrections(alkis_df, corrections_file, state):
@@ -209,14 +112,6 @@ def main():
         # Apply Generic Corrections
         corrections_file = os.path.join(SITE_DIR, state, f"{state}_alkis_corrections.json")
         alkis = apply_corrections(alkis, corrections_file, state)
-
-        # Address Splitting
-        if state in ["nrw"]:
-            alkis = process_complex_addresses(alkis, state)
-
-        # NRW Specific Cleaning
-        if state == "nrw":
-            alkis = clean_nrw_data(alkis)
 
         # Generate Keys
         print(f"[{state}] Generating keys...")

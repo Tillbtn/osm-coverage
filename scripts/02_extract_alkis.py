@@ -6,6 +6,7 @@ import geopandas as gpd
 import pandas as pd
 import tqdm
 import re 
+import numpy as np 
 
 # Configuration
 DATA_DIR = "data"
@@ -13,6 +14,106 @@ DATA_DIR = "data"
 DIR_NDS = os.path.join(DATA_DIR, "nds")
 DIR_NRW = os.path.join(DATA_DIR, "nrw")
 DIR_RLP = os.path.join(DATA_DIR, "rlp")
+
+def remove_ortsteil(text):
+    """
+    Removes 'Ortsteil ...' from the address string.
+    """
+    if not isinstance(text, str): return text
+    return re.sub(r',\s*Ortsteil\s+[^;]+', '', text, flags=re.IGNORECASE).strip()
+
+def split_alkis_address_string(original_street, original_hnr_string):
+    """
+    Parses "Straße 1, 2, Weg 3" into [("Straße", "1"), ("Straße", "2"), ("Weg", "3")]
+    """
+    if not isinstance(original_hnr_string, str): 
+         return [(original_street, original_hnr_string)]
+         
+    original_hnr_string = original_hnr_string.replace(';', ',')
+
+    if ',' not in original_hnr_string:
+        return [(original_street, original_hnr_string)]
+        
+    parts = original_hnr_string.split(',')
+    results = []
+    
+    current_street = original_street
+    
+    # Pattern: Matches "New Street Name 123"
+    # Group 1: Non-digit characters (Street)
+    # Group 2: Digit characters (House Number start)
+    street_pattern = re.compile(r'^\s*([^\d].*?)\s+([0-9].*)$')
+    
+    first = True
+    for part in parts:
+        part = part.strip()
+        if not part: continue
+        
+        if first:
+            results.append((current_street, part))
+            first = False
+            continue
+                
+        match = street_pattern.match(part)
+        if match:
+            current_street = match.group(1)
+            hnr = match.group(2)
+            results.append((current_street, hnr))
+        else:
+            results.append((current_street, part))
+            
+    return results
+
+def expand_complex_addresses(df, desc="Splitting Addresses"):
+    """
+    Splits rows where housenumber contains commas/semicolons.
+    """
+    if 'housenumber' not in df.columns: return df
+    
+    mask = df['housenumber'].astype(str).str.contains(r'[,;]', regex=True)
+    if not mask.any():
+        return df
+        
+    print(f"  Found {mask.sum()} complex address rows to split.")
+    
+    rows_to_split = df[mask]
+    clean_rows = df[~mask]
+    
+    new_data = []
+    
+    for idx, row in rows_to_split.iterrows():
+        street = row['street']
+        hnr = row['housenumber']
+        
+        splits = split_alkis_address_string(street, hnr)
+        
+        for s_new, h_new in splits:
+            entry = row.to_dict()
+            entry['street'] = s_new
+            entry['housenumber'] = h_new
+            new_data.append(entry)
+            
+    split_df = pd.DataFrame(new_data)
+    
+    if not split_df.empty:
+        if isinstance(df, gpd.GeoDataFrame):
+             split_df = gpd.GeoDataFrame(split_df, geometry='geometry', crs=df.crs)
+        
+        combined = pd.concat([clean_rows, split_df], ignore_index=True)
+        return combined
+    
+    return df
+
+def clean_nrw_street_suffixes(df):
+    """
+    Removes 2-letter suffixes from street names found in some NRW datasets (e.g. "Frankenstr. Ju")
+    """
+    if 'street' not in df.columns: return df
+    
+    # Check if we have any streets ending in Space + 2 letters
+    regex = r'\s+[A-Za-zäöüßÄÖÜ]{2}$'
+    df['street'] = df['street'].astype(str).str.replace(regex, "", regex=True).str.strip()
+    return df
 
 
 def normalize_columns(gdf):
@@ -39,6 +140,9 @@ def normalize_columns(gdf):
         
         # Filter out rows where lagebeztxt is missing
         gdf = gdf[gdf[col_name].notna()].copy()
+        
+        # Clean Ortsteil before splitting
+        gdf[col_name] = gdf[col_name].apply(remove_ortsteil)
 
         # Regex split
         # Pattern: Starts with non-digits (Street), then space, then Digit (Housenumber)
@@ -229,6 +333,11 @@ def process_nrw(directory):
                     if norm_gdf is not None:
                         norm_gdf['district'] = district
                         norm_gdf['state'] = 'NRW'
+                        
+                        # Apply NRW specific cleaning & Splitting
+                        norm_gdf = clean_nrw_street_suffixes(norm_gdf)
+                        norm_gdf = expand_complex_addresses(norm_gdf)
+                        
                         results.append(norm_gdf)
                     else:
                         print(f"  [DEBUG] Normalization failed for {base} (Layer: {target_layer})")
