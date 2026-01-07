@@ -111,7 +111,8 @@ def clean_nrw_street_suffixes(df):
     if 'street' not in df.columns: return df
     
     # Check if we have any streets ending in Space + 2 letters
-    regex = r'\s+[A-Za-zäöüßÄÖÜ]{2}$'
+    # Exclude common valid 2-letter endings like "Au" or "Aa", and Roman numerals
+    regex = r'\s+(?!(?:Au|Aa|Oy|Ut|II|IV|VI|IX|XI)$)[A-Za-zäöüßÄÖÜ]{2}$'
     df['street'] = df['street'].astype(str).str.replace(regex, "", regex=True).str.strip()
     return df
 
