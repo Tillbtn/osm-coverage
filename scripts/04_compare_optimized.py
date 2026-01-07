@@ -15,6 +15,7 @@ def normalize_key(street, hnr):
     s = s.replace("ß", "ss")
     s = s.replace("bgm.", "bürgermeister")
     s = s.replace("pl.", "platz")
+    s = s.replace("st.", "sankt")
     s = s.replace("prof.", "professor")
     s = s.replace("str.", "strasse") 
     s = s.replace("str ", "strasse ")
@@ -79,6 +80,62 @@ def apply_corrections(alkis_df, corrections_file, state):
     print(f"[{state}] Applied corrections to {count} rows.")
     return alkis_df
 
+def expand_address_ranges(df):
+    """
+    Expands rows with address ranges (e.g., "7-13") into individual rows 
+    (7, 9, 11, 13).
+    """
+    if df.empty or 'housenumber' not in df.columns:
+        return df
+
+    # Regex for "123 - 456" or "12-14"
+    # Capture groups: 1=Start, 2=End
+    range_pattern = re.compile(r'^(\d+)\s*-\s*(\d+)$')
+
+    mask = df['housenumber'].astype(str).str.contains('-', na=False)
+    
+    if not mask.any():
+        return df
+    
+    print(f"  Found {mask.sum()} rows with ranges to potentially expand.")
+    
+    df_ranges = df[mask].copy()
+    df_clean = df[~mask]
+
+    new_rows = []
+    
+    for idx, row in df_ranges.iterrows():
+        hnr = str(row['housenumber']).strip()
+        match = range_pattern.match(hnr)
+        
+        if match:
+            start = int(match.group(1))
+            end = int(match.group(2))
+                            
+            # Determine step
+            # If both even or both odd -> step 2
+            # If mixed -> step 1
+            if (start % 2) == (end % 2):
+                step = 2
+            else:
+                step = 1
+                
+            for num in range(start, end + 1, step):
+                new_row = row.copy()
+                new_row['housenumber'] = str(num)
+                new_rows.append(new_row)
+        else:
+            new_rows.append(row)
+
+    if new_rows:
+        df_expanded = pd.DataFrame(new_rows)
+        if isinstance(df, gpd.GeoDataFrame):
+             df_expanded = gpd.GeoDataFrame(df_expanded, geometry='geometry', crs=df.crs)
+             
+        return pd.concat([df_clean, df_expanded], ignore_index=True)
+    
+    return df
+
 def main():
     STATES_LIST = ["nds", "nrw", "rlp"] 
     
@@ -112,6 +169,11 @@ def main():
         # Apply Generic Corrections
         corrections_file = os.path.join(SITE_DIR, state, f"{state}_alkis_corrections.json")
         alkis = apply_corrections(alkis, corrections_file, state)
+
+        Expand Address Ranges (e.g. 7-13 -> 7, 9, 11, 13)
+        print(f"[{state}] Expanding address ranges...")
+        alkis = expand_address_ranges(alkis)
+        osm = expand_address_ranges(osm)
 
         # Generate Keys
         print(f"[{state}] Generating keys...")
