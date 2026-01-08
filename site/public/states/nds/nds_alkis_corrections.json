@@ -10,6 +10,13 @@
         "to_street": "Westädts Garten"
     },
     {
+        "from_street": "Sternkamp",
+        "from_housenumber": "70",
+        "city": "Lüneburg",
+        "to_street": "Sternkamp",
+        "to_housenumber": "70abcd"
+    },
+    {
         "from_street": "Joh.-Conrad-Schlaun-Straße",
         "city": "Osnabrück",
         "to_street": "Johann-Conrad-Schlaun-Straße"

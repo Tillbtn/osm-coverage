@@ -116,6 +116,16 @@ def clean_nrw_street_suffixes(df):
     df['street'] = df['street'].astype(str).str.replace(regex, "", regex=True).str.strip()
     return df
 
+def clean_nds_street_suffixes(df):
+    """
+    Removes suffixes starting with a comma followed by text (non-digits) from NDS data.
+    """
+    if 'street' not in df.columns: return df
+    
+    # Pattern: comma, optional whitespace, non-digits until end of string
+    regex = r',\s*[^0-9]+$'
+    df['street'] = df['street'].astype(str).str.replace(regex, "", regex=True).str.strip()
+    return df
 
 def normalize_columns(gdf):
     """
@@ -278,6 +288,10 @@ def process_lgln(directory):
             if gdf is not None:
                 gdf['district'] = district
                 gdf['state'] = 'Niedersachsen'
+                
+                # Apply NDS specific cleaning
+                gdf = clean_nds_street_suffixes(gdf)
+                
                 results.append(gdf)
             else:
                 print(f"  Normalization failed for {base}")
@@ -400,6 +414,9 @@ def process_rlp(directory):
         df = pd.read_csv(csv_path, sep=';', dtype=str)
         
         df = df.dropna(subset=['str', 'hnr', 'ostwert', 'nordwert'])
+        
+        # Filter out invalid housenumbers (0)
+        df = df[df['hnr'] != '0']
         
         df['housenumber'] = df['hnr'] + df['adz'].fillna('')
         

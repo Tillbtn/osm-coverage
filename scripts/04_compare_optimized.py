@@ -14,11 +14,16 @@ def normalize_key(street, hnr):
     s = re.sub(r'\(.*?\)', '', s)
     s = s.replace("ß", "ss")
     s = s.replace("bgm.", "bürgermeister")
+    s = s.replace("bgm", "bürgermeister")
+    s = s.replace("dr.", "doktor")
+    s = s.replace("dr", "doktor")
     s = s.replace("pl.", "platz")
     s = s.replace("st.", "sankt")
     s = s.replace("prof.", "professor")
     s = s.replace("str.", "strasse") 
     s = s.replace("str ", "strasse ")
+    s = s.replace("bauerschaft", "")
+    s = s.replace("gerhard-hauptmann", "gerhart-hauptmann")
     s = s.replace(" ", "").replace("-", "").replace(".", "").replace("/", "")
     
     h = str(hnr).lower().replace(" ", "")
@@ -52,30 +57,44 @@ def apply_corrections(alkis_df, corrections_file, state):
     count = 0
     for corr in corrections:
         from_street = corr.get("from_street")
-        if not from_street: continue
+        replace_in_street = corr.get("replace_in_street")
         
-        mask = alkis_df['street'] == from_street
-        
-        if "city" in corr:
-            # map city to district if column exists
-            if 'district' in alkis_df.columns:
-                 mask &= (alkis_df['district'] == corr["city"])
-        
-        if "from_housenumber" in corr:
-             mask &= (alkis_df['housenumber'] == corr["from_housenumber"])
-             
-        if not mask.any():
-            continue
+        if from_street:
+            mask = alkis_df['street'] == from_street
             
-        rows_affected = mask.sum()
-        count += rows_affected
-        
-        # Apply changes
-        if "to_street" in corr:
-            alkis_df.loc[mask, 'street'] = corr["to_street"]
+            if "city" in corr:
+                # map city to district if column exists
+                if 'district' in alkis_df.columns:
+                     mask &= (alkis_df['district'] == corr["city"])
             
-        if "to_housenumber" in corr:
-            alkis_df.loc[mask, 'housenumber'] = corr["to_housenumber"]
+            if "from_housenumber" in corr:
+                 mask &= (alkis_df['housenumber'] == corr["from_housenumber"])
+                 
+            if not mask.any():
+                continue
+                
+            rows_affected = mask.sum()
+            count += rows_affected
+            
+            # Apply changes
+            if "to_street" in corr:
+                alkis_df.loc[mask, 'street'] = corr["to_street"]
+                
+            if "to_housenumber" in corr:
+                alkis_df.loc[mask, 'housenumber'] = corr["to_housenumber"]
+
+        elif replace_in_street:
+            replace_with = corr.get("replace_with", "")
+            mask = alkis_df['street'].astype(str).str.contains(replace_in_street, regex=False)
+            
+            if "city" in corr:
+                if 'district' in alkis_df.columns:
+                     mask &= (alkis_df['district'] == corr["city"])
+            
+            if mask.any():
+                rows_affected = mask.sum()
+                count += rows_affected
+                alkis_df.loc[mask, 'street'] = alkis_df.loc[mask, 'street'].str.replace(replace_in_street, replace_with, regex=False)
 
     print(f"[{state}] Applied corrections to {count} rows.")
     return alkis_df
@@ -170,7 +189,7 @@ def main():
         corrections_file = os.path.join(SITE_DIR, state, f"{state}_alkis_corrections.json")
         alkis = apply_corrections(alkis, corrections_file, state)
 
-        Expand Address Ranges (e.g. 7-13 -> 7, 9, 11, 13)
+        # Expand Address Ranges (e.g. 7-13 -> 7, 9, 11, 13)
         print(f"[{state}] Expanding address ranges...")
         alkis = expand_address_ranges(alkis)
         osm = expand_address_ranges(osm)
