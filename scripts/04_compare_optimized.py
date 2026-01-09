@@ -99,6 +99,47 @@ def apply_corrections(alkis_df, corrections_file, state):
     print(f"[{state}] Applied corrections to {count} rows.")
     return alkis_df
 
+def expand_aachen_addresses(df):
+    if df.empty or 'city' not in df.columns or 'housenumber' not in df.columns:
+        return df
+        
+    # Filter for Aachen
+    mask_city = df['city'] == 'Aachen'
+    if not mask_city.any():
+        return df
+        
+    # Regex to find separators: / , ;
+    mask_complex = df['housenumber'].astype(str).str.contains(r'[/,;]', regex=True)
+    
+    mask = mask_city & mask_complex
+    
+    if not mask.any():
+        return df
+
+    rows_to_split = df[mask]
+    clean_rows = df[~mask]
+    
+    new_data = []
+    
+    for idx, row in rows_to_split.iterrows():
+        hnr = str(row['housenumber'])
+        # Replace all separators with one common separator (comma)
+        hnr_clean = re.sub(r'[/;]', ',', hnr)
+        parts = [p.strip() for p in hnr_clean.split(',') if p.strip()]
+        
+        for part in parts:
+            new_row = row.copy()
+            new_row['housenumber'] = part
+            new_data.append(new_row)
+            
+    if new_data:
+        df_split = pd.DataFrame(new_data)
+        if isinstance(df, gpd.GeoDataFrame):
+             df_split = gpd.GeoDataFrame(df_split, geometry='geometry', crs=df.crs)
+        return pd.concat([clean_rows, df_split], ignore_index=True)
+        
+    return df
+
 def expand_address_ranges(df):
     """
     Expands rows with address ranges (e.g., "7-13") into individual rows 
@@ -188,6 +229,11 @@ def main():
         # Apply Generic Corrections
         corrections_file = os.path.join(SITE_DIR, state, f"{state}_alkis_corrections.json")
         alkis = apply_corrections(alkis, corrections_file, state)
+
+        # Expand Aachen Addresses
+        if state == "nrw":
+             alkis = expand_aachen_addresses(alkis)
+             osm = expand_aachen_addresses(osm)
 
         # Expand Address Ranges (e.g. 7-13 -> 7, 9, 11, 13)
         print(f"[{state}] Expanding address ranges...")

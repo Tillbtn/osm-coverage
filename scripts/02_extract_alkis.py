@@ -22,13 +22,18 @@ def remove_ortsteil(text):
     if not isinstance(text, str): return text
     return re.sub(r',\s*Ortsteil\s+[^;]+', '', text, flags=re.IGNORECASE).strip()
 
-def split_alkis_address_string(original_street, original_hnr_string):
+
+def split_alkis_address_string(original_street, original_hnr_string, extra_separators=None):
     """
     Parses "Straße 1, 2, Weg 3" into [("Straße", "1"), ("Straße", "2"), ("Weg", "3")]
     """
     if not isinstance(original_hnr_string, str): 
          return [(original_street, original_hnr_string)]
          
+    if extra_separators:
+        for sep in extra_separators:
+            original_hnr_string = original_hnr_string.replace(sep, ',')
+
     original_hnr_string = original_hnr_string.replace(';', ',')
 
     if ',' not in original_hnr_string:
@@ -64,13 +69,19 @@ def split_alkis_address_string(original_street, original_hnr_string):
             
     return results
 
-def expand_complex_addresses(df, desc="Splitting Addresses"):
+def expand_complex_addresses(df, extra_separators=None, desc="Splitting Addresses"):
     """
     Splits rows where housenumber contains commas/semicolons.
     """
     if 'housenumber' not in df.columns: return df
     
-    mask = df['housenumber'].astype(str).str.contains(r'[,;]', regex=True)
+    regex = r'[,;]'
+    if extra_separators:
+        # Escape separators if needed
+        escaped_seps = "".join([re.escape(s) for s in extra_separators])
+        regex = f"[{escaped_seps},;]"
+    
+    mask = df['housenumber'].astype(str).str.contains(regex, regex=True)
     if not mask.any():
         return df
         
@@ -85,7 +96,7 @@ def expand_complex_addresses(df, desc="Splitting Addresses"):
         street = row['street']
         hnr = row['housenumber']
         
-        splits = split_alkis_address_string(street, hnr)
+        splits = split_alkis_address_string(street, hnr, extra_separators=extra_separators)
         
         for s_new, h_new in splits:
             entry = row.to_dict()
@@ -351,7 +362,12 @@ def process_nrw(directory):
                         
                         # Apply NRW specific cleaning & Splitting
                         norm_gdf = clean_nrw_street_suffixes(norm_gdf)
-                        norm_gdf = expand_complex_addresses(norm_gdf)
+                        
+                        extra_seps = None
+                        if district in ["Aachen Städteregion", "Aachen_Städteregion", "Aachen, Städteregion"]:
+                             extra_seps = ['/']
+                             
+                        norm_gdf = expand_complex_addresses(norm_gdf, extra_separators=extra_seps)
                         
                         results.append(norm_gdf)
                     else:

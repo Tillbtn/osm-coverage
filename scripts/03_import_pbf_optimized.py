@@ -56,8 +56,8 @@ class AddressHandler(osmium.SimpleHandler):
                     self.buffer.append({
                         'street': street_val,
                         'housenumber': tags['addr:housenumber'],
-                        # 'postcode': tags.get('addr:postcode', ''), # Optional: drop to save more RAM if not used
-                        # 'city': tags.get('addr:city', ''),         # Optional: drop to save more RAM
+                        # 'postcode': tags.get('addr:postcode', ''), 
+                        'city': tags.get('addr:city', ''),
                         'wkb': wkb_data
                     })
                     
