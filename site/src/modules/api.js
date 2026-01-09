@@ -1,8 +1,8 @@
-export async function fetchDistricts() {
+export async function fetchDistricts(url = '/districts.json') {
     const ts = new Date().getTime();
     try {
-        const response = await fetch(`/districts.json?t=${ts}`); // Absolute path since it's in public
-        if (!response.ok) throw new Error("Failed to load districts.json");
+        const response = await fetch(`${url}?t=${ts}`);
+        if (!response.ok) throw new Error(`Failed to load ${url}`);
         return await response.json();
     } catch (err) {
         console.error(err);
@@ -10,10 +10,10 @@ export async function fetchDistricts() {
     }
 }
 
-export async function fetchHistory() {
+export async function fetchHistory(url = '/detailed_history.json') {
     const ts = new Date().getTime();
     try {
-        const response = await fetch(`/detailed_history.json?t=${ts}`);
+        const response = await fetch(`${url}?t=${ts}`);
         if (!response.ok) return null;
         return await response.json();
     } catch (err) {

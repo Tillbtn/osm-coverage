@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OSM-ALKIS Adressenvergleich - Niedersachsen</title>
+    <title>OSM-ALKIS Adressenvergleich</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
@@ -13,11 +13,14 @@
 <body>
     <div id="container">
         <header>
-            <h1>OSM-ALKIS Adressenvergleich (Niedersachsen)</h1>
+            <h1>OSM-ALKIS Adressenvergleich</h1>
             <!-- <nav style="margin-bottom: 10px;">
                 <a href="buildings.html" style="color: white; text-decoration: underline;">Fehlende Gebäude</a>
             </nav> -->
             <div class="header-controls">
+                <select id="stateSelect" style="margin-right: 10px;">
+                    <option value="">Bundesland wählen...</option>
+                </select>
                 <select id="districtSelect">
                     <option value="Global">Landkreis auswählen</option>
                 </select>

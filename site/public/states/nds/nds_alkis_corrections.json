@@ -5,6 +5,23 @@
         "to_street": "Graf-Schenk-von-Stauffenberg-Str."
     },
     {
+        "from_street": "Westädt's Garten",
+        "city": "Lüneburg",
+        "to_street": "Westädts Garten"
+    },
+    {
+        "from_street": "Sternkamp",
+        "from_housenumber": "70",
+        "city": "Lüneburg",
+        "to_street": "Sternkamp",
+        "to_housenumber": "70abcd"
+    },
+    {
+        "from_street": "Joh.-Conrad-Schlaun-Straße",
+        "city": "Osnabrück",
+        "to_street": "Johann-Conrad-Schlaun-Straße"
+    },
+    {
         "comment": "Optional: single numbers",
         "from_street": "Teststraße",
         "from_housenumber": "1b",

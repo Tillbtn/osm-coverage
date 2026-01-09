@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OSM-ALKIS Niedersachsen</title>
+    <title>OSM-ALKIS Abdeckung</title>
     <link rel="stylesheet" href="/src/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 </head>
@@ -13,20 +13,32 @@
     <div class="landing-container">
         <header class="landing-header">
             <h1>OSM-ALKIS Vergleich</h1>
-            <p>Datenauswertung für Niedersachsen</p>
+            <p>Wähle ein Bundesland</p>
         </header>
 
         <div class="cards-grid">
-            <a href="addresses.html" class="card">
-                <div class="card-icon">🏠</div>
-                <h2>Adressabdeckung</h2>
-                <p>Vergleich von ALKIS-Adressen mit OSM-Daten. Statistiken und Verlauf.</p>
+            <a href="addresses.html?state=nds" class="card">
+                <div class="card-icon">🌲</div>
+                <h2>Niedersachsen</h2>
+                <p>Adressabgleich für Niedersachsen</p>
+            </a>
+
+            <a href="addresses.html?state=nrw" class="card">
+                <div class="card-icon">🏭</div>
+                <h2>Nordrhein-Westfalen</h2>
+                <p>Adressabgleich für NRW</p>
+            </a>
+
+            <a href="addresses.html?state=rlp" class="card">
+                <div class="card-icon">🍇</div>
+                <h2>Rheinland-Pfalz</h2>
+                <p>Adressabgleich für Rheinland-Pfalz</p>
             </a>
 
             <a href="buildings.html" class="card">
                 <div class="card-icon">🏢</div>
                 <h2>Fehlende Gebäude</h2>
-                <p>Visualisierung von Adressen, die nicht innerhalb eines OSM-Gebäudes liegen.</p>
+                <p>Visualisierung fehlender Gebäude (Allgemein/NDS)</p>
             </a>
         </div>
     </div>

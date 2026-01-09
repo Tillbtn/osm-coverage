@@ -13,9 +13,21 @@ import gc
 
 # Configuration
 DATA_DIR = "data"
-PBF_URL = "https://download.geofabrik.de/europe/germany/niedersachsen-latest.osm.pbf"
-PBF_FILE = os.path.join(DATA_DIR, "niedersachsen-latest.osm.pbf")
-OUTPUT_FILE = os.path.join(DATA_DIR, "osm_addresses.parquet")
+
+STATES = {
+    "nds": {
+        "pbf_url": "https://download.geofabrik.de/europe/germany/niedersachsen-latest.osm.pbf",
+        "pbf_file": "niedersachsen-latest.osm.pbf"
+    },
+    "nrw": {
+        "pbf_url": "https://download.geofabrik.de/europe/germany/nordrhein-westfalen-latest.osm.pbf",
+        "pbf_file": "nordrhein-westfalen-latest.osm.pbf"
+    },
+    "rlp": {
+        "pbf_url": "https://download.geofabrik.de/europe/germany/rheinland-pfalz-latest.osm.pbf",
+        "pbf_file": "rheinland-pfalz-latest.osm.pbf"
+    }
+}
 
 # Optimization: Process in chunks
 CHUNK_SIZE = 10000  
@@ -100,74 +112,71 @@ class AddressHandler(osmium.SimpleHandler):
         except:
              pass
 
-def download_pbf():
-    print(f"Checking {PBF_URL}...")
+
+def download_pbf(url, local_path):
+    print(f"Checking {url}...")
     try:
-        head_response = requests.head(PBF_URL)
+        head_response = requests.head(url)
         head_response.raise_for_status()
         last_modified = head_response.headers.get("Last-Modified")
 
-        if last_modified and os.path.exists(PBF_FILE):
+        if last_modified and os.path.exists(local_path):
             remote_time = parsedate_to_datetime(last_modified)
-            local_time = datetime.fromtimestamp(os.path.getmtime(PBF_FILE), tz=timezone.utc)
+            local_time = datetime.fromtimestamp(os.path.getmtime(local_path), tz=timezone.utc)
             
-            print(f"Remote: {remote_time}, Local: {local_time}")
-            
+            # Allow 1 hour buffer or exact match
+            # If local is newer or same, we skip.
             if remote_time <= local_time:
-                print("Local file is newer or same age as remote. Skipping download.")
-                return
+                print(f"  Local file is up-to-date (Remote: {remote_time}, Local: {local_time}). Skipping download.")
+                return False
 
     except Exception as e:
         print(f"Warning: Could not check timestamp: {e}. Proceeding with download attempt.")
 
-    print(f"Downloading {PBF_URL}...")
-    with requests.get(PBF_URL, stream=True) as r:
+    print(f"Downloading {url} to {local_path}...")
+    with requests.get(url, stream=True) as r:
         r.raise_for_status()
         total_size = int(r.headers.get('content-length', 0))
         block_size = 8192
-        with open(PBF_FILE, 'wb') as f, tqdm.tqdm(total=total_size, unit='iB', unit_scale=True) as t:
+        with open(local_path, 'wb') as f, tqdm.tqdm(total=total_size, unit='iB', unit_scale=True) as t:
             for chunk in r.iter_content(chunk_size=block_size):
                 t.update(len(chunk))
                 f.write(chunk)
     print("Download complete.")
+    return True
 
-
-def main():
-    # Check if update is needed
-    # try:
-    #     import check_geofabrik_export_date
-    #     print("Checking if OSM update is required...")
-    #     remote_date = check_geofabrik_export_date.get_remote_date()
-    #     local_date = check_geofabrik_export_date.get_local_date()
-        
-    #     if remote_date and local_date and remote_date <= local_date:
-    #         print(f"No update needed. Remote ({remote_date}) <= Local ({local_date})")
-    #         return
-    # except ImportError:
-    #     print("Warning: Could not import check_geofabrik_export_date. Skipping Date Check.")
-
-    os.makedirs(DATA_DIR, exist_ok=True)
-    download_pbf()
+def process_state(state_key, config):
+    state_dir = os.path.join(DATA_DIR, state_key)
+    pbf_dir = os.path.join(state_dir, "osm")
+    os.makedirs(pbf_dir, exist_ok=True)
     
-    print(f"Extracting addresses from PBF in chunks of {CHUNK_SIZE}...")
+    pbf_path = os.path.join(pbf_dir, config["pbf_file"])
+    output_parquet = os.path.join(state_dir, "osm.parquet")
+    
+    downloaded = download_pbf(config["pbf_url"], pbf_path)
+    
+    if not downloaded and os.path.exists(output_parquet):
+        pbf_time = os.path.getmtime(pbf_path)
+        parq_time = os.path.getmtime(output_parquet)
+        if parq_time > pbf_time:
+            print(f"[{state_key}] Parquet is newer than PBF. Skipping processing.")
+            return
+
+    print(f"[{state_key}] Extracting addresses from PBF in chunks of {CHUNK_SIZE}...")
     handler = AddressHandler()
     
     try:
-        # Use AreaManager with 2-pass approach
         am = osmium.area.AreaManager()
         
-        # Pass 1: Scan relations
-        print("Pass 1: Scanning relations (AreaManager)...")
-        reader1 = osmium.io.Reader(PBF_FILE)
+        # Pass 1
+        print(f"[{state_key}] Pass 1: Scanning relations...")
+        reader1 = osmium.io.Reader(pbf_path)
         osmium.apply(reader1, am.first_pass_handler())
         reader1.close()
         
-        # Pass 2: Assembly and processing
-        print("Pass 2: Assembling areas and extracting addresses...")
-        # We pass our handler to the second pass handler
-        reader2 = osmium.io.Reader(PBF_FILE)
-        
-        # Location Handler
+        # Pass 2
+        print(f"[{state_key}] Pass 2: Assembling areas and extracting addresses...")
+        reader2 = osmium.io.Reader(pbf_path)
         idx = osmium.index.create_map("sparse_file_array")
         lh = osmium.NodeLocationsForWays(idx)
         lh.ignore_errors()
@@ -178,35 +187,39 @@ def main():
         # Final flush
         handler.flush_buffer()
     except Exception as e:
-        print(f"\nError processing PBF: {e}")
+        print(f"[{state_key}] Error processing PBF: {e}")
         return
     
     handler.pbar.close()
     
-    print(f"\nProcessed {handler.total_addresses} addresses in {len(handler.chunks)} chunks.")
-    
     if not handler.chunks:
-        print("No addresses found?")
+        print(f"[{state_key}] No addresses found.")
         return
         
-    print("Concatenating chunks...")
-    # This might momentarily spike memory, but much less than the list-of-dicts approach
+    print(f"[{state_key}] Concatenating chunks...")
     full_gdf = pd.concat(handler.chunks, ignore_index=True)
     
     # Release chunks memory
     handler.chunks = None
     gc.collect()
     
-    print("Global Deduplication...")
+    print(f"[{state_key}] Global Deduplication...")
     full_gdf['lon'] = full_gdf.geometry.x
     full_gdf['lat'] = full_gdf.geometry.y
     full_gdf.drop_duplicates(subset=['street', 'housenumber', 'lat', 'lon'], inplace=True)
     full_gdf.drop(columns=['lat', 'lon'], inplace=True)
     
-    print(f"Total unique OSM addresses: {len(full_gdf)}")
+    print(f"[{state_key}] Total unique OSM addresses: {len(full_gdf)}")
     
-    full_gdf.to_parquet(OUTPUT_FILE)
-    print(f"Saved to {OUTPUT_FILE}")
+    full_gdf.to_parquet(output_parquet)
+    print(f"[{state_key}] Saved to {output_parquet}")
+
+
+def main():
+    os.makedirs(DATA_DIR, exist_ok=True)
+    
+    for state_key, config in STATES.items():
+        process_state(state_key, config)
 
 if __name__ == "__main__":
     main()

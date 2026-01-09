@@ -5,6 +5,7 @@ import { fetchGeoJSON } from './modules/api';
 
 const map = createMap('map');
 let currentLayer = null;
+let districtsData = [];
 
 // Populate District Select
 // Note: buildings/districts.json might be different from root districts.json
@@ -15,6 +16,7 @@ fetch('/buildings/districts.json') // Absolute path for public
         return response.json();
     })
     .then(districts => {
+        districtsData = districts;
         const select = document.getElementById('districtSelect');
         if (select) {
             districts.forEach(d => {
@@ -39,11 +41,25 @@ fetch('/buildings/districts.json') // Absolute path for public
 
 
 function loadGlobal() {
-    loadData('/missing_buildings.geojson', 'Gesamtes Niedersachsen');
+    // Attempt to determine state name from context or default
+    const state = document.body.dataset.state;
+    let label = "Gesamtes Gebiet";
+    if (state === 'nds') label = "Gesamtes Niedersachsen";
+    else if (state === 'nrw') label = "Gesamtes NRW";
+    else if (state === 'rlp') label = "Gesamtes Rheinland-Pfalz";
+
+    loadData('/missing_buildings.geojson', label);
 }
 
 function loadDistrict(name) {
-    loadData(`/buildings/${name}.geojson`, name);
+    let url = `/buildings/${name}.geojson`;
+    if (districtsData) {
+        const meta = districtsData.find(d => d.name === name);
+        if (meta && meta.path) {
+            url = `/buildings/${meta.path}`;
+        }
+    }
+    loadData(url, name);
 }
 
 function loadData(url, label) {
