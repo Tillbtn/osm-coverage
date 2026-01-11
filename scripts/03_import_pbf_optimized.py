@@ -34,6 +34,10 @@ STATES = {
     "hh": {
         "pbf_url": "https://download.geofabrik.de/europe/germany/hamburg-latest.osm.pbf",
         "pbf_file": "hamburg-latest.osm.pbf"
+    },
+    "he": {
+        "pbf_url": "https://download.geofabrik.de/europe/germany/hessen-latest.osm.pbf",
+        "pbf_file": "hessen-latest.osm.pbf"
     }
 }
 

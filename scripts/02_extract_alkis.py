@@ -17,6 +17,7 @@ DIR_NRW = os.path.join(DATA_DIR, "nrw")
 DIR_RLP = os.path.join(DATA_DIR, "rlp")
 DIR_BB = os.path.join(DATA_DIR, "bb")
 DIR_HH = os.path.join(DATA_DIR, "hh")
+DIR_HE = os.path.join(DATA_DIR, "he")
 
 def remove_ortsteil(text):
     """
@@ -736,12 +737,71 @@ def process_hh(directory):
     return results
 
 
+def process_he(directory):
+    txts = glob.glob(os.path.join(directory, "*.txt"))
+    if not txts:
+        print(f"[HE] No .txt files found in {directory}.")
+        return []
+
+    results = []
+    
+    for txt_path in txts:
+        print(f"[HE] Processing {os.path.basename(txt_path)}...")
+        try:
+             # Columns: nba;oid;qua;landschl;land;regbezschl;regbez;kreisschl;kreis;gmdschl;gmd;ottschl;ott;strschl;str;hnr;adz;zone;ostwert;nordwert
+             df = pd.read_csv(txt_path, sep=';', dtype=str, encoding='utf-8', on_bad_lines='skip')
+             
+             df.columns = df.columns.str.lower()
+             
+             required = ['str', 'hnr', 'ostwert', 'nordwert']
+             if not all(col in df.columns for col in required):
+                 print(f"[HE] Missing columns in {txt_path}. Found: {df.columns.tolist()}")
+                 continue
+
+             df = df.dropna(subset=required)
+             
+             # Filter out invalid housenumbers (0)
+             df = df[df['hnr'] != '0']
+             
+             df['housenumber'] = df['hnr'] + df['adz'].fillna('')
+             
+             df = df.rename(columns={
+                'str': 'street',
+                'gmd': 'district',
+             })
+             
+             df['postcode'] = None
+             df['city'] = df['district']
+             
+             # Coordinates Hessen UTM32 (EPSG:25832)
+             x = pd.to_numeric(df['ostwert'], errors='coerce')
+             y = pd.to_numeric(df['nordwert'], errors='coerce')
+             
+             gdf = gpd.GeoDataFrame(
+                df[['street', 'housenumber', 'postcode', 'city', 'district']],
+                geometry=gpd.points_from_xy(x, y),
+                crs="EPSG:25832"
+             )
+             
+             # Remove invalid geometries
+             gdf = gdf[gdf.geometry.is_valid & ~gdf.geometry.is_empty]
+             
+             gdf['state'] = 'Hessen'
+             results.append(gdf)
+             
+        except Exception as e:
+            print(f"[HE] Error processing {txt_path}: {e}")
+            
+    return results
+
+
 def main():
-    # process_state("NDS", DIR_NDS, process_lgln)
-    # process_state("NRW", DIR_NRW, process_nrw)
-    # process_state("RLP", DIR_RLP, process_rlp)
-    # process_state("BB", DIR_BB, process_bb)
+    process_state("NDS", DIR_NDS, process_lgln)
+    process_state("NRW", DIR_NRW, process_nrw)
+    process_state("RLP", DIR_RLP, process_rlp)
+    process_state("BB", DIR_BB, process_bb)
     process_state("HH", DIR_HH, process_hh)
+    process_state("HE", DIR_HE, process_he)
 
 if __name__ == "__main__":
     main()
