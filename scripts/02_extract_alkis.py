@@ -7,6 +7,7 @@ import pandas as pd
 import tqdm
 import re 
 import numpy as np 
+from shapely.geometry import Point 
 
 # Configuration
 DATA_DIR = "data"
@@ -15,6 +16,7 @@ DIR_NDS = os.path.join(DATA_DIR, "nds")
 DIR_NRW = os.path.join(DATA_DIR, "nrw")
 DIR_RLP = os.path.join(DATA_DIR, "rlp")
 DIR_BB = os.path.join(DATA_DIR, "bb")
+DIR_HH = os.path.join(DATA_DIR, "hh")
 
 def remove_ortsteil(text):
     """
@@ -505,11 +507,241 @@ def process_bb(directory):
         print(f"[BB] Error processing GPKG: {e}")
         return []
 
+def process_hh(directory):
+    # Expects data/hh/alkis.zip or data/hh/*.gml
+    # Usually "INSPIRE_Adressen_Hauskoordinaten_HH_*.gml" inside zip
+    
+    # 1. Check for GML files directly
+    gmls = glob.glob(os.path.join(directory, "*.gml"))
+    
+    # 2. Check for ZIP
+    if not gmls:
+        zips = glob.glob(os.path.join(directory, "*.zip"))
+        if zips:
+             for z in zips:
+                 try:
+                     print(f"[HH] Extracting {z}...")
+                     with zipfile.ZipFile(z, 'r') as zf:
+                         # Extract only GMLs if possible, to avoid clutter
+                         for n in zf.namelist():
+                             if n.lower().endswith('.gml'):
+                                 zf.extract(n, directory)
+                 except Exception as e:
+                     print(f"[HH] Error extracting {z}: {e}")
+        
+        gmls = glob.glob(os.path.join(directory, "*.gml"))
+
+    if not gmls:
+        # Fallback: Check parent directory (data/hh)
+        parent = os.path.dirname(directory)
+        gmls = glob.glob(os.path.join(parent, "*.gml"))
+        
+        if not gmls:
+             # Check for zip in parent
+             zips = glob.glob(os.path.join(parent, "*.zip"))
+             if zips:
+                 for z in zips:
+                      try:
+                         print(f"[HH] Extracting {z}...")
+                         with zipfile.ZipFile(z, 'r') as zf:
+                             for n in zf.namelist():
+                                 if n.lower().endswith('.gml'):
+                                     zf.extract(n, directory) # Extract to alkis folder
+                      except: pass
+             gmls = glob.glob(os.path.join(directory, "*.gml"))
+
+    if not gmls:
+        print(f"[HH] No GML files found in {directory} or parent.")
+        return []
+        
+    results = []
+    
+    import xml.etree.ElementTree as ET
+    
+    # Namespaces usually found in INSPIRE GML
+    ns = {
+        'gml': 'http://www.opengis.net/gml/3.2',
+        'ad': 'http://inspire.ec.europa.eu/schemas/ad/4.0', # Version might vary (3.0 or 4.0)
+        'base': 'http://inspire.ec.europa.eu/schemas/base/3.3'
+    }
+    
+    # Alternative namespaces if above fail
+    # We will try to detect or just use wildcard search or local-name() in XPath if possible
+    # But ET only supports simple dict.
+    
+    for gml_path in gmls:
+        print(f"[HH] Parsing {os.path.basename(gml_path)} (this may take a while)...")
+        
+        # We need to handle two types of objects:
+        # 1. Address (contains housenumber, geometry, and link to component)
+        # 2. ThoroughfareName (contains street name) OR AddressComponent (Street)
+        
+        # Strategy: Pass 1 to build Street Map, Pass 2 to build Addresses
+        # Or if file is small enough, load all. INSPIRE GML can be 500MB+.
+        # Iterparse is recommended.
+        
+        streets = {} # id -> name
+        addresses = []
+        
+        try:
+            context = ET.iterparse(gml_path, events=('end',))
+            
+            for event, elem in context:
+                # Remove namespace for easier checking (hacky but effective for varied GML versions)
+                tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                
+                if tag == "ThoroughfareName":
+                    # Structure: <ad:ThoroughfareName gml:id="..."> ... <ad:name> <ad:GeographicalName> ... <ad:spelling> <ad:SpellingOfName> <ad:text>Name</ad:text>
+                    # This is DEEP.
+                    # Simplified check:
+                    gml_id = elem.get(f"{{{ns['gml']}}}id")
+                    if not gml_id: gml_id = elem.get("id") # fallback
+                     
+                    # Find name text
+                    # We look for 'text' element deeply
+                    name_text = None
+                    for text_node in elem.iter():
+                        if text_node.tag.endswith('text') and text_node.text:
+                            name_text = text_node.text
+                            break
+                    
+                    if gml_id and name_text:
+                        gml_id = gml_id.strip()
+                        streets[f"#{gml_id}"] = name_text
+                        streets[gml_id] = name_text
+                        
+                    elem.clear()
+                    
+                elif tag == "Address":
+                    # <ad:Address gml:id="...">
+                    #   <ad:position> ... <gml:Point> ... <gml:pos>X Y</gml:pos>
+                    #   <ad:locator> ... <ad:designator> ... <ad:text>123</ad:text> or <ad:designator>123</ad:designator>
+                    #   <ad:component xlink:href="#id_of_street"/>
+                    
+                    # Extract Geometry
+                    pos_text = None
+                    for pos in elem.iter():
+                         if pos.tag.endswith('pos'): 
+                             pos_text = pos.text
+                             break
+                    
+                    # Extract Housenumber
+                    # Extract Housenumber
+                    hnr_parts = []
+                    for node in elem.iter():
+                        if node.tag.endswith('designator') and node.text and node.text.strip():
+                             hnr_parts.append(node.text.strip())
+                    
+                    if hnr_parts:
+                        # Join parts. Usually "51" and "a" -> "51a".
+                        # Sometimes they might be duplicate? No, iter visits each node once.
+                        # Assuming order is document order: 51 then a.
+                        hnr_text = "".join(hnr_parts)
+                    else:
+                        hnr_text = None
+                    
+                    # Improve HNR extraction: Look specifically inside AddressLocator
+                    # But iter() is depth-first.
+                    
+                    # Extract Street Ref
+                    street_ref = None
+                    street_ref = None
+                    for comp in elem.iter():
+                        if comp.tag.endswith('component'):
+                            href = comp.get('{http://www.w3.org/1999/xlink}href')
+                            if href and ("ThoroughfareName" in href or "thoroughfare" in href.lower()):
+                                street_ref = href.strip()
+                                break
+                    
+                    if pos_text and hnr_text and street_ref:
+                         addresses.append({
+                             'hnr': hnr_text,
+                             'pos': pos_text,
+                             'street_ref': street_ref
+                         })
+                         
+                    elem.clear()
+
+        except Exception as e:
+            print(f"[HH] Error parsing {gml_path}: {e}")
+            continue
+            
+        print(f"[HH] Found {len(streets)} streets and {len(addresses)} addresses.")
+        
+        # Build GDF
+        data = []
+        
+        for addr in addresses:
+            s_ref = addr['street_ref']
+            street_name = streets.get(s_ref)
+            
+            # If not found directly, try cleaning ref
+            if not street_name:
+                 # Check for urn stripping or hash mismatch
+                 # Example s_ref: "urn:ogc:def:crs:EPSG::25832" -> this is NOT a street ref usually
+                 # Example s_ref: "#DEHH..." 
+                 
+                 if s_ref.startswith('#'):
+                     street_name = streets.get(s_ref[1:])
+                 elif s_ref in streets:
+                     street_name = streets[s_ref]
+                 else:
+                     # Try finding by partial match?
+                     pass
+            
+            if not street_name and len(data) < 5:
+                # Debug failed lookups for first few
+                 print(f"DEBUG: Failed lookup for ref '{s_ref}'")
+            s_ref = addr['street_ref']
+            street_name = streets.get(s_ref)
+            
+            # If not found directly, try cleaning ref
+            if not street_name:
+                 # sometimes refs are urns: urn:ogc:def:crs... no, refs to objects.
+                 # "urn:x:y:StreetID"
+                 pass
+                 
+            if street_name:
+                try:
+                    coords = addr['pos'].strip().split()
+                    if len(coords) >= 2:
+                        x, y = float(coords[0]), float(coords[1])
+                        
+                        data.append({
+                            'street': street_name,
+                            'housenumber': addr['hnr'],
+                            'postcode': None,
+                            'city': 'Hamburg',
+                            'district': 'Hamburg', # Single district for now
+                            'geometry': Point(x, y)
+                        })
+                except: pass
+                
+        if data:
+            gdf = gpd.GeoDataFrame(data, crs="EPSG:25832") # INSPIRE usually 25832 or 4258. Check GML srsName.
+            # Assuming 25832 for Germany/Hamburg usually.
+            # If coordinates are small (lat/lon), it's 4258.
+            # 300000 5000000 -> UTM.
+            
+            # Check first coord magnitude
+            if not gdf.empty:
+                x_sample = gdf.geometry.iloc[0].x
+                if x_sample < 180:
+                    gdf.set_crs("EPSG:4258", inplace=True, allow_override=True)
+                    gdf = gdf.to_crs("EPSG:25832")
+                
+            gdf['state'] = 'Hamburg'
+            results.append(gdf)
+            
+    return results
+
+
 def main():
     # process_state("NDS", DIR_NDS, process_lgln)
     # process_state("NRW", DIR_NRW, process_nrw)
     # process_state("RLP", DIR_RLP, process_rlp)
-    process_state("BB", DIR_BB, process_bb)
+    # process_state("BB", DIR_BB, process_bb)
+    process_state("HH", DIR_HH, process_hh)
 
 if __name__ == "__main__":
     main()

@@ -33,7 +33,8 @@ STATES = {
     "nds": { "pbf_file": "niedersachsen-latest.osm.pbf" },
     "nrw": { "pbf_file": "nordrhein-westfalen-latest.osm.pbf" },
     "rlp": { "pbf_file": "rheinland-pfalz-latest.osm.pbf" },
-    "bb": { "pbf_file": "brandenburg-latest.osm.pbf" }
+    "bb": { "pbf_file": "brandenburg-latest.osm.pbf" },
+    "hh": { "pbf_file": "hamburg-latest.osm.pbf" }
 }
 
 
@@ -198,7 +199,8 @@ def expand_address_ranges(df):
     return df
 
 def main():
-    STATES_LIST = ["nds", "nrw", "rlp", "bb"] 
+    # STATES_LIST = ["nds", "nrw", "rlp", "bb", "hh"] 
+    STATES_LIST = ["hh"] 
     
     DATA_DIR = "data"
     SITE_DIR = "site/public/states"

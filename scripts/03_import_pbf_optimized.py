@@ -30,6 +30,10 @@ STATES = {
     "bb": {
         "pbf_url": "https://download.geofabrik.de/europe/germany/brandenburg-latest.osm.pbf",
         "pbf_file": "brandenburg-latest.osm.pbf"
+    },
+    "hh": {
+        "pbf_url": "https://download.geofabrik.de/europe/germany/hamburg-latest.osm.pbf",
+        "pbf_file": "hamburg-latest.osm.pbf"
     }
 }
 
