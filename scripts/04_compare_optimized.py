@@ -32,7 +32,8 @@ def normalize_key(street, hnr):
 STATES = {
     "nds": { "pbf_file": "niedersachsen-latest.osm.pbf" },
     "nrw": { "pbf_file": "nordrhein-westfalen-latest.osm.pbf" },
-    "rlp": { "pbf_file": "rheinland-pfalz-latest.osm.pbf" }
+    "rlp": { "pbf_file": "rheinland-pfalz-latest.osm.pbf" },
+    "bb": { "pbf_file": "brandenburg-latest.osm.pbf" }
 }
 
 
@@ -197,7 +198,7 @@ def expand_address_ranges(df):
     return df
 
 def main():
-    STATES_LIST = ["nds", "nrw", "rlp"] 
+    STATES_LIST = ["nds", "nrw", "rlp", "bb"] 
     
     DATA_DIR = "data"
     SITE_DIR = "site/public/states"

@@ -26,6 +26,10 @@ STATES = {
     "rlp": {
         "pbf_url": "https://download.geofabrik.de/europe/germany/rheinland-pfalz-latest.osm.pbf",
         "pbf_file": "rheinland-pfalz-latest.osm.pbf"
+    },
+    "bb": {
+        "pbf_url": "https://download.geofabrik.de/europe/germany/brandenburg-latest.osm.pbf",
+        "pbf_file": "brandenburg-latest.osm.pbf"
     }
 }
 

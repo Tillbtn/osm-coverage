@@ -14,6 +14,7 @@ DATA_DIR = "data"
 DIR_NDS = os.path.join(DATA_DIR, "nds")
 DIR_NRW = os.path.join(DATA_DIR, "nrw")
 DIR_RLP = os.path.join(DATA_DIR, "rlp")
+DIR_BB = os.path.join(DATA_DIR, "bb")
 
 def remove_ortsteil(text):
     """
@@ -465,10 +466,50 @@ def process_rlp(directory):
         print(f"[RLP] Error processing CSV: {e}")
         return []
 
+def process_bb(directory):
+    gpkg_path = os.path.join(directory, "adressen-bb.gpkg")
+
+    if not os.path.exists(gpkg_path):
+        print(f"[BB] GPKG not found at {gpkg_path}")
+        return []
+        
+    print(f"[BB] Reading GPKG from {gpkg_path}...")
+    
+    try:
+        gdf = gpd.read_file(gpkg_path, layer='adressen-bb', engine='pyogrio')
+        
+        gdf = gdf.dropna(subset=['str', 'hnr'])
+        
+        # Combine HNR + ADZ
+        gdf['housenumber'] = gdf['hnr'].astype(str) + gdf['adz'].fillna('').astype(str)
+        
+        gdf = gdf.rename(columns={
+            'str': 'street',
+            'postplz': 'postcode',
+            'gmd': 'district'
+        })
+        
+        gdf['city'] = gdf['district']
+        
+        # Ensure geometry validity
+        gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty & gdf.geometry.is_valid]
+        
+        cols = ['street', 'housenumber', 'postcode', 'city', 'district', 'geometry']
+        gdf = gdf[cols].copy()
+        
+        gdf['state'] = 'Brandenburg'
+        
+        return [gdf]
+        
+    except Exception as e:
+        print(f"[BB] Error processing GPKG: {e}")
+        return []
+
 def main():
-    process_state("NDS", DIR_NDS, process_lgln)
-    process_state("NRW", DIR_NRW, process_nrw)
-    process_state("RLP", DIR_RLP, process_rlp)
+    # process_state("NDS", DIR_NDS, process_lgln)
+    # process_state("NRW", DIR_NRW, process_nrw)
+    # process_state("RLP", DIR_RLP, process_rlp)
+    process_state("BB", DIR_BB, process_bb)
 
 if __name__ == "__main__":
     main()
