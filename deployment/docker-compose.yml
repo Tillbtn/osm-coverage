@@ -15,6 +15,19 @@ services:
     environment:
       - TZ=Europe/Berlin
 
+  backend:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.backend
+    container_name: osm_cover_backend
+    volumes:
+      - ../public_data:/data
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - DATA_DIR=/data
+
   worker:
     build:
       context: ..
