@@ -57,12 +57,12 @@ class CorrectionModal {
             <div id="correction-modal" class="modal" style="display:none; z-index: 3000;">
                 <div class="modal-content" style="max-width: 450px; border-radius: 8px; overflow: hidden; padding: 0;">
                     <div style="background: #3b82f6; color: white; padding: 1rem; display: flex; justify-content: space-between; align-items: center;">
-                        <h2 style="margin: 0; font-size: 1.25rem;">Korrektur</h2>
+                        <h2 style="margin: 0; font-size: 1.25rem;">Korrektur für den Abgleich</h2>
                         <span class="close-correction-button" style="cursor: pointer; font-size: 1.5rem; line-height: 1;">&times;</span>
                     </div>
                     <div style="padding: 1.5rem;">
                         <div style="margin-bottom: 1rem; background: #f3f4f6; padding: 0.75rem; border-radius: 4px;">
-                            <strong>Adresse:</strong><br>
+                            <strong>Adresse im ALKIS:</strong><br>
                             <span id="corr-modal-address"></span>
                         </div>
 
@@ -204,7 +204,7 @@ class CorrectionModal {
         })
             .then(response => {
                 if (response.ok) {
-                    this.msgDiv.textContent = 'Korrektur gespeichert!';
+                    this.msgDiv.textContent = 'Korrektur gespeichert. Erscheint ab ca. 7:00 Uhr auf der Karte';
                     this.msgDiv.style.color = '#10b981';
                     this.submitBtn.textContent = 'Gespeichert';
                     setTimeout(() => this.hide(), 1500);
@@ -371,7 +371,7 @@ function loadDistrict(name) {
                         const container = document.createElement('div');
                         container.innerHTML = `
                             <strong>Fehlt in OSM:</strong><br>${street} ${hnr}<br><br>
-                            <button class="correction-init-btn" style="background: #3b82f6; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.375rem; cursor: pointer; font-weight: 500; width: 100%; margin-bottom: 5px;">Korrektur</button>
+                            <button class="correction-init-btn" style="background: #3b82f6; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.375rem; cursor: pointer; font-weight: 500; width: 100%; margin-bottom: 5px;">ALKIS fehlerhaft</button>
                         `;
                         container.appendChild(createJOSMLink(lat, lng));
 
