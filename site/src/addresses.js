@@ -73,22 +73,22 @@ class CorrectionModal {
                         </select>
                         
                         <div id="corr-fields-single">
-                            <label style="display: block; margin-bottom: 0.25rem; font-size: 0.9em; color: #4b5563;">OSM-Straßenname</label>
+                            <label style="display: block; margin-bottom: 0.25rem; font-size: 0.9em; color: #4b5563;">OSM-Straßenname (OTG)</label>
                             <input id="corr-single-street" style="width: 100%; margin-bottom: 0.75rem; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.375rem;">
                             
-                            <label style="display: block; margin-bottom: 0.25rem; font-size: 0.9em; color: #4b5563;">OSM-Hausnummer</label>
+                            <label style="display: block; margin-bottom: 0.25rem; font-size: 0.9em; color: #4b5563;">OSM-Hausnummer (OTG)</label>
                             <input id="corr-single-hnr" style="width: 100%; margin-bottom: 0.75rem; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.375rem;">
                         </div>
 
                         <div id="corr-fields-street" style="display:none;">
-                            <label style="display: block; margin-bottom: 0.25rem; font-size: 0.9em; color: #4b5563;">OSM-Straßenname</label>
+                            <label style="display: block; margin-bottom: 0.25rem; font-size: 0.9em; color: #4b5563;">OSM-Straßenname (OTG)</label>
                             <input id="corr-street-all" style="width: 100%; margin-bottom: 0.75rem; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.375rem;">
                         </div>
 
                         <div id="corr-fields-ignore" style="display:none;">
                         </div>
 
-                        <label style="display: block; margin-bottom: 0.25rem; font-size: 0.9em; color: #4b5563;">Kommentar (optional)</label>
+                        <label style="display: block; margin-bottom: 0.25rem; font-size: 0.9em; color: #4b5563;">Kommentar</label>
                         <textarea id="corr-comment" rows="3" style="width: 100%; margin-bottom: 1rem; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.375rem; font-family: inherit;"></textarea>
 
                         <div id="corr-msg" style="margin-bottom: 1rem; text-align: center; font-weight: 600;"></div>
@@ -170,9 +170,12 @@ class CorrectionModal {
         let correction = {};
 
         const comment = this.inputComment.value.trim();
-        if (comment) {
-            correction.comment = comment;
+        if (!comment) {
+            this.msgDiv.textContent = 'Kommentar fehlt.';
+            this.msgDiv.style.color = '#ef4444';
+            return;
         }
+        correction.comment = comment;
 
         if (type === 'street') {
             correction.from_street = this.street;
@@ -351,9 +354,14 @@ function loadDistrict(name) {
         .then(data => {
             currentLayer = L.geoJSON(data, {
                 pointToLayer: function (feature, latlng) {
+                    let fillColor = "#ff4444";
+                    if (feature.properties && feature.properties.matched && feature.properties.correction_type) {
+                        fillColor = "#3b82f6"; // Blue for corrected matches
+                    }
+
                     return L.circleMarker(latlng, {
                         radius: 6,
-                        fillColor: "#ff4444",
+                        fillColor: fillColor,
                         color: "#fff",
                         weight: 1,
                         opacity: 1,
@@ -364,24 +372,57 @@ function loadDistrict(name) {
                     if (feature.properties) {
                         const street = feature.properties.street || '';
                         const hnr = feature.properties.housenumber || '';
+                        const isMatched = feature.properties.matched;
+                        const comment = feature.properties.correction_comment || '';
+                        const origStreet = feature.properties.original_street || street;
+                        const origHnr = feature.properties.original_housenumber || hnr;
 
                         const lat = layer.getLatLng().lat;
                         const lng = layer.getLatLng().lng;
 
+                        let title = "Fehlt in OSM:";
+                        if (isMatched) {
+                            title = "Abweichung vom ALKIS:";
+                        }
+
                         const container = document.createElement('div');
-                        container.innerHTML = `
-                            <strong>Fehlt in OSM:</strong><br>${street} ${hnr}<br><br>
-                            <button class="correction-init-btn" style="background: #3b82f6; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.375rem; cursor: pointer; font-weight: 500; width: 100%; margin-bottom: 5px;">ALKIS fehlerhaft</button>
-                        `;
+                        let content = "";
+
+                        if (isMatched && (feature.properties.original_street || feature.properties.original_housenumber)) {
+                            content = `<strong>${title}</strong><br>
+                                        <div style="margin-bottom: 4px;">
+                                            <span style="color: #666; font-size: 0.9em;">ALKIS:</span><br>
+                                            ${origStreet} ${origHnr}
+                                        </div>
+                                        <div style="margin-bottom: 8px;">
+                                            <span style="color: #666; font-size: 0.9em;">OSM:</span><br>
+                                            ${street} ${hnr}
+                                        </div>`;
+                        } else {
+                            // Standard Display
+                            content = `<strong>${title}</strong><br>${street} ${hnr}<br><br>`;
+                        }
+
+                        if (isMatched) {
+                            if (comment) {
+                                content += `<div style="font-style: italic; margin-bottom: 5px; color: #555;">${comment}</div>`;
+                            }
+                        } else {
+                            content += `<button class="correction-init-btn" style="background: #3b82f6; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.375rem; cursor: pointer; font-weight: 500; width: 100%; margin-bottom: 5px;">ALKIS fehlerhaft?</button>`;
+                        }
+
+                        container.innerHTML = content;
                         container.appendChild(createJOSMLink(lat, lng));
 
-                        // Bind event for modal
+                        // Bind event for modal only if button exists
                         const btn = container.querySelector('.correction-init-btn');
-                        btn.addEventListener('click', (e) => {
-                            e.stopPropagation(); // prevent map events
-                            correctionModal.open(street, hnr);
-                            map.closePopup();
-                        });
+                        if (btn) {
+                            btn.addEventListener('click', (e) => {
+                                e.stopPropagation(); // prevent map events
+                                correctionModal.open(street, hnr);
+                                map.closePopup();
+                            });
+                        }
 
                         layer.bindPopup(container, { maxWidth: 300 });
                     }
@@ -391,7 +432,10 @@ function loadDistrict(name) {
             if (data.features.length > 0) {
                 map.fitBounds(currentLayer.getBounds());
             }
-            document.getElementById('stats').innerText = `${data.features.length} fehlende Adressen`;
+
+            // Calculate stats based on matched property
+            const missingCount = data.features.filter(f => !f.properties.matched).length;
+            document.getElementById('stats').innerText = `${missingCount} fehlende Adressen`;
         })
         .catch(err => {
             console.error(err);

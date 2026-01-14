@@ -58,9 +58,24 @@ def apply_corrections(alkis_df, corrections_file, state):
         return alkis_df
         
     count = 0
+    if 'correction_type' not in alkis_df.columns:
+        alkis_df['correction_type'] = pd.NA
+        alkis_df['correction_type'] = alkis_df['correction_type'].astype('object')
+    if 'correction_comment' not in alkis_df.columns:
+        alkis_df['correction_comment'] = pd.NA
+        alkis_df['correction_comment'] = alkis_df['correction_comment'].astype('object')
+    if 'original_street' not in alkis_df.columns:
+        alkis_df['original_street'] = pd.NA
+        alkis_df['original_street'] = alkis_df['original_street'].astype('object')
+    if 'original_housenumber' not in alkis_df.columns:
+        alkis_df['original_housenumber'] = pd.NA
+        alkis_df['original_housenumber'] = alkis_df['original_housenumber'].astype('object')
+
     for corr in corrections:
         from_street = corr.get("from_street")
         replace_in_street = corr.get("replace_in_street")
+        tag = corr.get("tag", "corrected") # Allow custom tag from JSON, default to "corrected"
+        comment = corr.get("comment", None)
         
         if from_street:
             mask = alkis_df['street'] == from_street
@@ -79,12 +94,26 @@ def apply_corrections(alkis_df, corrections_file, state):
             rows_affected = mask.sum()
             count += rows_affected
             
+            mask_orig_street_nan = mask & alkis_df['original_street'].isna()
+            if mask_orig_street_nan.any():
+                 alkis_df.loc[mask_orig_street_nan, 'original_street'] = alkis_df.loc[mask_orig_street_nan, 'street']
+
+            mask_orig_hnr_nan = mask & alkis_df['original_housenumber'].isna()
+            if mask_orig_hnr_nan.any():
+                 alkis_df.loc[mask_orig_hnr_nan, 'original_housenumber'] = alkis_df.loc[mask_orig_hnr_nan, 'housenumber']
+            
             # Apply changes
             if "to_street" in corr:
                 alkis_df.loc[mask, 'street'] = corr["to_street"]
+                alkis_df.loc[mask, 'correction_type'] = tag
+                if comment:
+                    alkis_df.loc[mask, 'correction_comment'] = comment
                 
             if "to_housenumber" in corr:
                 alkis_df.loc[mask, 'housenumber'] = corr["to_housenumber"]
+                alkis_df.loc[mask, 'correction_type'] = tag
+                if comment:
+                    alkis_df.loc[mask, 'correction_comment'] = comment
 
         elif replace_in_street:
             replace_with = corr.get("replace_with", "")
@@ -96,8 +125,20 @@ def apply_corrections(alkis_df, corrections_file, state):
             
             if mask.any():
                 rows_affected = mask.sum()
+                
+                # Save original street
+                mask_orig_street_nan = mask & alkis_df['original_street'].isna()
+                if mask_orig_street_nan.any():
+                     alkis_df.loc[mask_orig_street_nan, 'original_street'] = alkis_df.loc[mask_orig_street_nan, 'street']
+                
                 count += rows_affected
                 alkis_df.loc[mask, 'street'] = alkis_df.loc[mask, 'street'].str.replace(replace_in_street, replace_with, regex=False)
+                alkis_df.loc[mask, 'correction_type'] = tag
+                if comment:
+                    alkis_df.loc[mask, 'correction_comment'] = comment
+                count += rows_affected
+                alkis_df.loc[mask, 'street'] = alkis_df.loc[mask, 'street'].str.replace(replace_in_street, replace_with, regex=False)
+                alkis_df.loc[mask, 'correction_type'] = tag
 
     print(f"[{state}] Applied corrections to {count} rows.")
     return alkis_df
@@ -386,11 +427,30 @@ def main():
                 d_hist[-1] = d_hist_entry
                 
             # GeoJSON Export
-            missing_export = district_missing[['street', 'housenumber', 'geometry']]
+            matches_corrected = district_alkis[district_alkis['found_in_osm'] & district_alkis['correction_type'].notna()].copy()
+            matches_corrected['matched'] = True
+            
+            # Combine missing with corrected matches
+            missing_export = district_missing.copy()
+            missing_export['matched'] = False
+            
+            combined_export = pd.concat([missing_export, matches_corrected], ignore_index=True)
+            
+            cols_to_export = ['street', 'housenumber', 'geometry', 'matched']
+            if 'correction_type' in combined_export.columns:
+                cols_to_export.append('correction_type')
+            if 'correction_comment' in combined_export.columns:
+                cols_to_export.append('correction_comment')
+            if 'original_street' in combined_export.columns:
+                 cols_to_export.append('original_street')
+            if 'original_housenumber' in combined_export.columns:
+                 cols_to_export.append('original_housenumber')
+                
+            final_export = combined_export[cols_to_export]
             
             out_path = os.path.join(districts_dir, out_filename)
-            if len(missing_export) > 0:
-                missing_export.to_file(out_path, driver="GeoJSON")
+            if len(final_export) > 0:
+                final_export.to_file(out_path, driver="GeoJSON")
             else:
                  with open(out_path, 'w') as f:
                     json.dump({"type": "FeatureCollection", "features": []}, f)
