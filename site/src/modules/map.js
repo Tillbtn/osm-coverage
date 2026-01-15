@@ -4,7 +4,7 @@ import 'leaflet/dist/leaflet.css';
 export function createMap(elementId, center = [52.9, 9.8], zoom = 8) {
     const map = L.map(elementId).setView(center, zoom);
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(map);
 
