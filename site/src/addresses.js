@@ -68,7 +68,7 @@ class CorrectionModal {
 
                         <select id="corr-type" style="width: 100%; margin-bottom: 1rem; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.375rem;">
                             <option value="single">Adresse korrigieren</option>
-                            <option value="street">Straßenname korrigieren</option>
+                            <option value="street">Straßenname korrigieren (alle Nummern)</option>
                             <option value="ignore">Adresse ignorieren</option>
                         </select>
                         
