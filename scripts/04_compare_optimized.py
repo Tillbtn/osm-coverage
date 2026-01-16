@@ -46,18 +46,7 @@ def apply_corrections(alkis_df, corrections_file, state):
     """
     Applies corrections from a JSON file to the ALKIS dataframe.
     """
-    if not os.path.exists(corrections_file):
-        return alkis_df
-        
-    print(f"[{state}] Applying corrections from {corrections_file}...")
-    try:
-        with open(corrections_file, 'r', encoding='utf-8') as f:
-            corrections = json.load(f)
-    except Exception as e:
-        print(f"[{state}] Error loading corrections file: {e}")
-        return alkis_df
-        
-    count = 0
+    # Initialize correction columns if they don't exist
     if 'correction_type' not in alkis_df.columns:
         alkis_df['correction_type'] = pd.NA
         alkis_df['correction_type'] = alkis_df['correction_type'].astype('object')
@@ -70,6 +59,19 @@ def apply_corrections(alkis_df, corrections_file, state):
     if 'original_housenumber' not in alkis_df.columns:
         alkis_df['original_housenumber'] = pd.NA
         alkis_df['original_housenumber'] = alkis_df['original_housenumber'].astype('object')
+
+    if not os.path.exists(corrections_file):
+        return alkis_df
+        
+    print(f"[{state}] Applying corrections from {corrections_file}...")
+    try:
+        with open(corrections_file, 'r', encoding='utf-8') as f:
+            corrections = json.load(f)
+    except Exception as e:
+        print(f"[{state}] Error loading corrections file: {e}")
+        return alkis_df
+        
+    count = 0
 
     for corr in corrections:
         from_street = corr.get("from_street")
