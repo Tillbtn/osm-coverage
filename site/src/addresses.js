@@ -137,9 +137,10 @@ class CorrectionModal {
         this.submitBtn.addEventListener('click', () => this.submit());
     }
 
-    open(street, hnr) {
+    open(street, hnr, alkisId) {
         this.street = street;
         this.hnr = hnr;
+        this.alkisId = alkisId;
         this.displayAddress.textContent = `${street} ${hnr}`;
 
         // Reset fields
@@ -181,17 +182,24 @@ class CorrectionModal {
             correction.from_street = this.street;
             correction.city = currentDistrictName;
             correction.to_street = this.inputStreetAll.value;
-        } else if (type === 'single') {
-            correction.from_street = this.street;
-            correction.from_housenumber = this.hnr;
-            correction.city = currentDistrictName;
-            correction.to_street = this.inputSingleStreet.value;
-            correction.to_housenumber = this.inputSingleHnr.value;
-        } else if (type === 'ignore') {
-            correction.from_street = this.street;
-            correction.from_housenumber = this.hnr;
-            correction.city = currentDistrictName;
-            correction.ignore = true;
+        } else {
+            // Add alkis_id if available for single/ignore corrections
+            if (this.alkisId) {
+                correction.alkis_id = this.alkisId;
+            }
+
+            if (type === 'single') {
+                correction.from_street = this.street;
+                correction.from_housenumber = this.hnr;
+                correction.city = currentDistrictName;
+                correction.to_street = this.inputSingleStreet.value;
+                correction.to_housenumber = this.inputSingleHnr.value;
+            } else if (type === 'ignore') {
+                correction.from_street = this.street;
+                correction.from_housenumber = this.hnr;
+                correction.city = currentDistrictName;
+                correction.ignore = true;
+            }
         }
 
         this.submitBtn.disabled = true;
@@ -419,7 +427,7 @@ function loadDistrict(name) {
                         if (btn) {
                             btn.addEventListener('click', (e) => {
                                 e.stopPropagation(); // prevent map events
-                                correctionModal.open(street, hnr);
+                                correctionModal.open(street, hnr, feature.properties.alkis_id);
                                 map.closePopup();
                             });
                         }

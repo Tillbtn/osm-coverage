@@ -79,7 +79,39 @@ def apply_corrections(alkis_df, corrections_file, state):
         tag = corr.get("tag", "corrected") # Allow custom tag from JSON, default to "corrected"
         comment = corr.get("comment", None)
         
-        if from_street:
+        # Check for ID-based correction first
+        if "alkis_id" in corr:
+            mask = alkis_df['alkis_id'] == corr["alkis_id"]
+            
+            if not mask.any():
+                continue
+                
+            rows_affected = mask.sum()
+            count += rows_affected
+            
+            # Save original values if needed (for first time correction)
+            mask_orig_street_nan = mask & alkis_df['original_street'].isna()
+            if mask_orig_street_nan.any():
+                 alkis_df.loc[mask_orig_street_nan, 'original_street'] = alkis_df.loc[mask_orig_street_nan, 'street']
+
+            mask_orig_hnr_nan = mask & alkis_df['original_housenumber'].isna()
+            if mask_orig_hnr_nan.any():
+                 alkis_df.loc[mask_orig_hnr_nan, 'original_housenumber'] = alkis_df.loc[mask_orig_hnr_nan, 'housenumber']
+            
+            # Apply changes
+            if "to_street" in corr:
+                alkis_df.loc[mask, 'street'] = corr["to_street"]
+                alkis_df.loc[mask, 'correction_type'] = tag
+                if comment:
+                    alkis_df.loc[mask, 'correction_comment'] = comment
+                
+            if "to_housenumber" in corr:
+                alkis_df.loc[mask, 'housenumber'] = corr["to_housenumber"]
+                alkis_df.loc[mask, 'correction_type'] = tag
+                if comment:
+                    alkis_df.loc[mask, 'correction_comment'] = comment
+                    
+        elif from_street:
             mask = alkis_df['street'] == from_street
             
             if "city" in corr:
@@ -447,6 +479,8 @@ def main():
                  cols_to_export.append('original_street')
             if 'original_housenumber' in combined_export.columns:
                  cols_to_export.append('original_housenumber')
+            if 'alkis_id' in combined_export.columns:
+                 cols_to_export.append('alkis_id')
                 
             final_export = combined_export[cols_to_export]
             

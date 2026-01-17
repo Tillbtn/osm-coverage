@@ -8,6 +8,7 @@ import tqdm
 import re 
 import numpy as np 
 from shapely.geometry import Point 
+import hashlib 
 
 # Configuration
 DATA_DIR = "data"
@@ -25,6 +26,18 @@ def remove_ortsteil(text):
     """
     if not isinstance(text, str): return text
     return re.sub(r',\s*Ortsteil\s+[^;]+', '', text, flags=re.IGNORECASE).strip()
+
+def generate_alkis_id(row):
+    """
+    Generates a unique ID for an ALKIS row based on its content and coordinates.
+    """
+    try:
+        geo_str = f"{row.geometry.x:.3f}_{row.geometry.y:.3f}" if row.geometry else "no_geo"
+    except:
+        geo_str = "invalid_geo"
+        
+    raw_str = f"{row.get('district', '')}_{row.get('street', '')}_{row.get('housenumber', '')}_{geo_str}"
+    return hashlib.md5(raw_str.encode('utf-8')).hexdigest()[:12]
 
 
 def split_alkis_address_string(original_street, original_hnr_string, extra_separators=None):
@@ -262,6 +275,11 @@ def process_state(state_name, state_dir, process_func):
         # Deduplicate
         full_gdf = full_gdf.drop_duplicates()
         
+        # Generate Unique IDs
+        print(f"[{state_name}] Generating ALKIS IDs...")
+        if 'alkis_id' not in full_gdf.columns:
+            full_gdf['alkis_id'] = full_gdf.apply(generate_alkis_id, axis=1)
+
         full_gdf.to_parquet(output_file)
         print(f"[{state_name}] Saved {len(full_gdf)} addresses to {output_file}")
     else:
