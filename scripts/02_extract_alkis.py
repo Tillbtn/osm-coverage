@@ -18,6 +18,7 @@ DIR_RLP = os.path.join(DATA_DIR, "rlp")
 DIR_BB = os.path.join(DATA_DIR, "bb")
 DIR_HH = os.path.join(DATA_DIR, "hh")
 DIR_HE = os.path.join(DATA_DIR, "he")
+DIR_MV = os.path.join(DATA_DIR, "mv")
 
 def remove_ortsteil(text):
     """
@@ -160,7 +161,7 @@ def normalize_columns(gdf):
     elif 'lagebezeichnung' in cols: street = gdf.columns[cols == 'lagebezeichnung'][0]
     elif 'bez' in cols: street = gdf.columns[cols == 'bez'][0]
     
-    # NRW Special Case: 'lagebeztxt' contains "Street 123b"
+    # Case: 'lagebeztxt' contains "Street 123b"
     if "lagebeztxt" in cols and street is None: 
         col_name = gdf.columns[cols == 'lagebeztxt'][0]
         
@@ -795,6 +796,75 @@ def process_he(directory):
     return results
 
 
+
+def process_mv(directory):
+    # Expects zipped shapefiles in data/mv/alkis
+    
+    # 1. Extract Zips
+    zips = glob.glob(os.path.join(directory, "*.zip"))
+    for z in tqdm.tqdm(zips, desc="Extracting MV Zips"):
+        folder = os.path.splitext(z)[0]
+        if not os.path.exists(folder):
+            try:
+                with zipfile.ZipFile(z, 'r') as zf:
+                    zf.extractall(folder)
+            except Exception as e:
+                print(f"[MV] Error extracting {z}: {e}")
+                
+    # 2. Find and Process Shapefiles
+    results = []
+    shps = glob.glob(os.path.join(directory, "**", "*GebaeudeBauwerk.shp"), recursive=True)
+    
+    if not shps:
+        print(f"[MV] No *GebaeudeBauwerk.shp files found in {directory}")
+        return []
+        
+    for shp in tqdm.tqdm(shps, desc="Processing MV Shapefiles"):
+        try:
+            # Read shapefile
+            # Only need lagebeztxt and geometry
+            gdf = gpd.read_file(shp, engine='pyogrio')
+            
+            # Check for lagebeztxt
+            if 'lagebeztxt' not in gdf.columns:
+                print(f"[MV] 'lagebeztxt' not found in {os.path.basename(shp)}")
+                continue
+                
+            # Filter NULL
+            gdf = gdf[gdf['lagebeztxt'] != 'NULL']
+            
+            if gdf.empty:
+                continue
+
+            # Split lagebeztxt into strasse and hausnummer
+            split_data = gdf['lagebeztxt'].astype(str).str.extract(r'^(.*)\s+([0-9].*)$')
+            
+            if not split_data.empty:
+                gdf['strasse'] = split_data[0]
+                gdf['hausnummer'] = split_data[1]
+                
+                gdf = gdf[['strasse', 'hausnummer', 'geometry']]
+                
+                norm_gdf = normalize_columns(gdf)
+                
+                if norm_gdf is not None:
+                    norm_gdf['state'] = 'MV'
+                    norm_gdf['district'] = os.path.basename(os.path.dirname(shp))
+                    
+                    # Expand complex addresses (e.g. "Str 1, 2")
+                    norm_gdf = expand_complex_addresses(norm_gdf)
+                    
+                    results.append(norm_gdf)
+                else:
+                    print(f"[MV] Normalization failed for {os.path.basename(shp)}")
+            else:
+                print(f"[MV] Regex split failed for all rows in {os.path.basename(shp)}")
+                
+        except Exception as e:
+            print(f"[MV] Error processing {shp}: {e}")
+            
+    return results
+
 def main():
     process_state("NDS", DIR_NDS, process_lgln)
     process_state("NRW", DIR_NRW, process_nrw)
@@ -802,6 +872,7 @@ def main():
     process_state("BB", DIR_BB, process_bb)
     process_state("HH", DIR_HH, process_hh)
     process_state("HE", DIR_HE, process_he)
+    process_state("MV", DIR_MV, process_mv)
 
 if __name__ == "__main__":
     main()

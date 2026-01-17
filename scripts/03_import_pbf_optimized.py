@@ -15,30 +15,35 @@ import gc
 DATA_DIR = "data"
 
 STATES = {
-    "nds": {
-        "pbf_url": "https://download.geofabrik.de/europe/germany/niedersachsen-latest.osm.pbf",
-        "pbf_file": "niedersachsen-latest.osm.pbf"
-    },
-    "nrw": {
-        "pbf_url": "https://download.geofabrik.de/europe/germany/nordrhein-westfalen-latest.osm.pbf",
-        "pbf_file": "nordrhein-westfalen-latest.osm.pbf"
-    },
-    "rlp": {
-        "pbf_url": "https://download.geofabrik.de/europe/germany/rheinland-pfalz-latest.osm.pbf",
-        "pbf_file": "rheinland-pfalz-latest.osm.pbf"
-    },
-    "bb": {
-        "pbf_url": "https://download.geofabrik.de/europe/germany/brandenburg-latest.osm.pbf",
-        "pbf_file": "brandenburg-latest.osm.pbf"
-    },
-    "hh": {
-        "pbf_url": "https://download.geofabrik.de/europe/germany/hamburg-latest.osm.pbf",
-        "pbf_file": "hamburg-latest.osm.pbf"
-    },
-    "he": {
-        "pbf_url": "https://download.geofabrik.de/europe/germany/hessen-latest.osm.pbf",
-        "pbf_file": "hessen-latest.osm.pbf"
+    # "nds": {
+    #     "pbf_url": "https://download.geofabrik.de/europe/germany/niedersachsen-latest.osm.pbf",
+    #     "pbf_file": "niedersachsen-latest.osm.pbf"
+    # },
+    # "nrw": {
+    #     "pbf_url": "https://download.geofabrik.de/europe/germany/nordrhein-westfalen-latest.osm.pbf",
+    #     "pbf_file": "nordrhein-westfalen-latest.osm.pbf"
+    # },
+    # "rlp": {
+    #     "pbf_url": "https://download.geofabrik.de/europe/germany/rheinland-pfalz-latest.osm.pbf",
+    #     "pbf_file": "rheinland-pfalz-latest.osm.pbf"
+    # },
+    # "bb": {
+    #     "pbf_url": "https://download.geofabrik.de/europe/germany/brandenburg-latest.osm.pbf",
+    #     "pbf_file": "brandenburg-latest.osm.pbf"
+    # },
+    # "hh": {
+    #     "pbf_url": "https://download.geofabrik.de/europe/germany/hamburg-latest.osm.pbf",
+    #     "pbf_file": "hamburg-latest.osm.pbf"
+    # },
+    "mv": {
+        "pbf_url": "https://download.geofabrik.de/europe/germany/mecklenburg-vorpommern-latest.osm.pbf",
+        "pbf_file": "mecklenburg-vorpommern-latest.osm.pbf"
     }
+    ,
+    # "he": {
+    #     "pbf_url": "https://download.geofabrik.de/europe/germany/hessen-latest.osm.pbf",
+    #     "pbf_file": "hessen-latest.osm.pbf"
+    # }
 }
 
 # Optimization: Process in chunks
