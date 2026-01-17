@@ -315,6 +315,11 @@ Promise.all([
 });
 
 
+// Helper to check if a property is valid (not null/undefined and not "<NA>" string from pandas)
+function isValid(val) {
+    return val !== null && val !== undefined && val !== "<NA>" && val !== "nan" && val !== "";
+}
+
 function loadDistrict(name) {
     if (currentLayer) map.removeLayer(currentLayer);
     currentLayer = null;
@@ -362,9 +367,22 @@ function loadDistrict(name) {
         .then(data => {
             currentLayer = L.geoJSON(data, {
                 pointToLayer: function (feature, latlng) {
-                    let fillColor = "#ff4444";
-                    if (feature.properties && feature.properties.matched && feature.properties.correction_type) {
-                        fillColor = "#3b82f6"; // Blue for corrected matches
+                    let fillColor = "#ff4444"; // Red (Missing)
+
+                    const props = feature.properties;
+                    // If correction_type is valid:
+                    // - If matched: Blue (#3b82f6)
+                    // - If NOT matched: Purple (#8b5cf6)
+                    // If matched but no correction_type: Green (#10b981)
+
+                    if (props && isValid(props.correction_type)) {
+                        if (props.matched) {
+                            fillColor = "#3b82f6"; // Blue for corrected matches
+                        } else {
+                            fillColor = "#8b5cf6"; // Purple for corrected but unmatched
+                        }
+                    } else if (props && props.matched) {
+                        fillColor = "#10b981"; // Green (Found without explicit correction)
                     }
 
                     return L.circleMarker(latlng, {
@@ -381,7 +399,7 @@ function loadDistrict(name) {
                         const street = feature.properties.street || '';
                         const hnr = feature.properties.housenumber || '';
                         const isMatched = feature.properties.matched;
-                        const comment = feature.properties.correction_comment || '';
+                        const comment = isValid(feature.properties.correction_comment) ? feature.properties.correction_comment : '';
                         const origStreet = feature.properties.original_street || street;
                         const origHnr = feature.properties.original_housenumber || hnr;
 
@@ -411,11 +429,12 @@ function loadDistrict(name) {
                             content = `<strong>${title}</strong><br>${street} ${hnr}<br><br>`;
                         }
 
-                        if (isMatched) {
-                            if (comment) {
-                                content += `<div style="font-style: italic; margin-bottom: 5px; color: #555;">${comment}</div>`;
-                            }
-                        } else {
+                        // Show comment if valid, regardless of match status
+                        if (comment) {
+                            content += `<div style="font-style: italic; margin-bottom: 5px; color: #555;">${comment}</div>`;
+                        }
+
+                        if (!isMatched) {
                             content += `<button class="correction-init-btn" style="background: #3b82f6; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.375rem; cursor: pointer; font-weight: 500; width: 100%; margin-bottom: 5px;">ALKIS fehlerhaft?</button>`;
                         }
 

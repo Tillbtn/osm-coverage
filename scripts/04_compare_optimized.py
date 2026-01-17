@@ -125,15 +125,17 @@ def apply_corrections(alkis_df, corrections_file, state):
                 continue
                 
             rows_affected = mask.sum()
-            count += rows_affected
             
-            mask_orig_street_nan = mask & alkis_df['original_street'].isna()
-            if mask_orig_street_nan.any():
-                 alkis_df.loc[mask_orig_street_nan, 'original_street'] = alkis_df.loc[mask_orig_street_nan, 'street']
+            # Save original street for affected rows where it's not set yet
+            mask_no_orig = mask & alkis_df['original_street'].isna()
+            if mask_no_orig.any():
+                 alkis_df.loc[mask_no_orig, 'original_street'] = alkis_df.loc[mask_no_orig, 'street']
 
             mask_orig_hnr_nan = mask & alkis_df['original_housenumber'].isna()
             if mask_orig_hnr_nan.any():
                  alkis_df.loc[mask_orig_hnr_nan, 'original_housenumber'] = alkis_df.loc[mask_orig_hnr_nan, 'housenumber']
+            
+            count += rows_affected
             
             # Apply changes
             if "to_street" in corr:
@@ -160,9 +162,9 @@ def apply_corrections(alkis_df, corrections_file, state):
                 rows_affected = mask.sum()
                 
                 # Save original street
-                mask_orig_street_nan = mask & alkis_df['original_street'].isna()
-                if mask_orig_street_nan.any():
-                     alkis_df.loc[mask_orig_street_nan, 'original_street'] = alkis_df.loc[mask_orig_street_nan, 'street']
+                mask_no_orig = mask & alkis_df['original_street'].isna()
+                if mask_no_orig.any():
+                     alkis_df.loc[mask_no_orig, 'original_street'] = alkis_df.loc[mask_no_orig, 'street']
                 
                 count += rows_affected
                 alkis_df.loc[mask, 'street'] = alkis_df.loc[mask, 'street'].str.replace(replace_in_street, replace_with, regex=False)
