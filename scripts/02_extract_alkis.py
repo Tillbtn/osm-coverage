@@ -836,29 +836,20 @@ def process_mv(directory):
             if gdf.empty:
                 continue
 
-            # Split lagebeztxt into strasse and hausnummer
-            split_data = gdf['lagebeztxt'].astype(str).str.extract(r'^(.*)\s+([0-9].*)$')
+
+            norm_gdf = normalize_columns(gdf)
             
-            if not split_data.empty:
-                gdf['strasse'] = split_data[0]
-                gdf['hausnummer'] = split_data[1]
+            if norm_gdf is not None:
+                norm_gdf['state'] = 'MV'
+                norm_gdf['district'] = os.path.basename(os.path.dirname(shp))
                 
-                gdf = gdf[['strasse', 'hausnummer', 'geometry']]
+                # Expand complex addresses (e.g. "Str 1, 2")
+                norm_gdf = expand_complex_addresses(norm_gdf)
                 
-                norm_gdf = normalize_columns(gdf)
-                
-                if norm_gdf is not None:
-                    norm_gdf['state'] = 'MV'
-                    norm_gdf['district'] = os.path.basename(os.path.dirname(shp))
-                    
-                    # Expand complex addresses (e.g. "Str 1, 2")
-                    norm_gdf = expand_complex_addresses(norm_gdf)
-                    
-                    results.append(norm_gdf)
-                else:
-                    print(f"[MV] Normalization failed for {os.path.basename(shp)}")
+                results.append(norm_gdf)
             else:
-                print(f"[MV] Regex split failed for all rows in {os.path.basename(shp)}")
+                print(f"[MV] Normalization failed for {os.path.basename(shp)} (Columns: {gdf.columns.tolist()})")
+
                 
         except Exception as e:
             print(f"[MV] Error processing {shp}: {e}")
