@@ -15,11 +15,13 @@ def normalize_key(street, hnr):
     s = s.replace("ß", "ss")
     s = s.replace("bgm.", "bürgermeister")
     s = s.replace("bgm", "bürgermeister")
+    s = s.replace("bürgerm.", "bürgermeister")
     s = s.replace("dr.", "doktor")
     s = s.replace("dr", "doktor")
     s = s.replace("pl.", "platz")
     s = s.replace("st.", "sankt")
     s = s.replace("prof.", "professor")
+    s = s.replace("geschw.", "geschwister")
     s = s.replace("str.", "strasse") 
     s = s.replace("str ", "strasse ")
     s = s.replace("bauerschaft", "")
@@ -37,9 +39,6 @@ STATES = {
     "hh": { "pbf_file": "hamburg-latest.osm.pbf" },
     "he": { "pbf_file": "hessen-latest.osm.pbf" }
 }
-
-
-
 
 
 def apply_corrections(alkis_df, corrections_file, state):

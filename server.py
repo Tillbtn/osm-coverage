@@ -52,7 +52,7 @@ def save_correction():
         client_ip = request.remote_addr
 
         # Construct the path to the correction file based on state        
-        file_path = os.path.join(DATA_DIR, 'states', state, f'reported_{state}_alkis_corrections.json')
+        file_path = os.path.join(DATA_DIR, 'states', state, f'{state}_alkis_corrections.json')
         
         logger.info(f"Received correction from {client_ip} for state {state}. Path: {file_path}")
         logger.info(f"Correction Content: {json.dumps(correction, ensure_ascii=False)}")
