@@ -182,6 +182,9 @@ class CorrectionModal {
             correction.from_street = this.street;
             correction.city = currentDistrictName;
             correction.to_street = this.inputStreetAll.value;
+            if (this.alkisId) {
+                correction.reference_alkis_id = this.alkisId;
+            }
         } else {
             // Add alkis_id if available for single/ignore corrections
             if (this.alkisId) {

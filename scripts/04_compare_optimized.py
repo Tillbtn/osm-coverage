@@ -120,7 +120,24 @@ def apply_corrections(alkis_df, corrections_file, state):
             
             if "from_housenumber" in corr:
                  mask &= (alkis_df['housenumber'] == corr["from_housenumber"])
-                 
+            
+            # Radius-based filtering
+            if "reference_alkis_id" in corr:
+                 ref_id = corr["reference_alkis_id"]
+                 ref_row = alkis_df[alkis_df['alkis_id'] == ref_id]
+                 if not ref_row.empty:
+                     ref_geom = ref_row.iloc[0].geometry
+                     # Calculate distance to reference point for ALL candidates
+                     candidate_indices = alkis_df[mask].index
+                     if not candidate_indices.empty:
+                         candidates = alkis_df.loc[candidate_indices]
+                         if candidates.crs and candidates.crs.is_geographic:
+                             dists = candidates.geometry.distance(ref_geom)
+                             mask &= (dists < 0.02) # degrees
+                         else:
+                             dists = candidates.geometry.distance(ref_geom)
+                             mask &= (dists <= 2000) # meters
+
             if not mask.any():
                 continue
                 
