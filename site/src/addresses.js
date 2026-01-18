@@ -189,11 +189,20 @@ class CorrectionModal {
             }
 
             if (type === 'single') {
+                const newStreet = this.inputSingleStreet.value.trim();
+                const newHnr = this.inputSingleHnr.value.trim();
+
+                if (newStreet === this.street && newHnr === this.hnr) {
+                    this.msgDiv.textContent = 'Bitte korrigierte Adresse eingeben.';
+                    this.msgDiv.style.color = '#ef4444';
+                    return;
+                }
+
                 correction.from_street = this.street;
                 correction.from_housenumber = this.hnr;
                 correction.city = currentDistrictName;
-                correction.to_street = this.inputSingleStreet.value;
-                correction.to_housenumber = this.inputSingleHnr.value;
+                correction.to_street = newStreet;
+                correction.to_housenumber = newHnr;
             } else if (type === 'ignore') {
                 correction.from_street = this.street;
                 correction.from_housenumber = this.hnr;
