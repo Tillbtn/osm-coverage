@@ -26,9 +26,9 @@ def normalize_key(street, hnr):
     s = s.replace("str ", "strasse ")
     s = s.replace("bauerschaft", "")
     s = s.replace("gerhard-hauptmann", "gerhart-hauptmann")
-    s = s.replace(" ", "").replace("-", "").replace(".", "").replace("/", "")
+    s = s.replace(" ", "").replace("-", "").replace(".", "").replace("/", "").replace(",", "")
     
-    h = str(hnr).lower().replace(" ", "")
+    h = str(hnr).lower().replace(" ", "").replace(",", "")
     return f"{s}{h}"
 
 STATES = {
@@ -346,6 +346,23 @@ def main():
         # osm
         osm['street'] = osm['street'].fillna("").astype(str)
         osm['housenumber'] = osm['housenumber'].fillna("").astype(str)
+        
+        # Expand OSM if 'housename' exists
+        if 'housename' in osm.columns:
+            # Create a copy for the extended key
+            mask_has_name = osm['housename'].notna() & (osm['housename'] != "")
+            
+            if mask_has_name.any():
+                print(f"[{state}] Exploding {mask_has_name.sum()} OSM rows with housenames for flexible matching...")
+                osm_expanded = osm[mask_has_name].copy()
+                
+                # Update housenumber to include name for the expanded rows
+                # Format: "number, name"
+                osm_expanded['housenumber'] = osm_expanded['housenumber'] + ", " + osm_expanded['housename']
+                
+                # Append to original
+                osm = pd.concat([osm, osm_expanded], ignore_index=True)
+
         osm['key'] = osm.apply(lambda row: normalize_key(row['street'], row['housenumber']), axis=1)
 
         # Align CRS

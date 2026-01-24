@@ -706,10 +706,12 @@ def process_hh(directory):
                              hnr_parts.append(node.text.strip())
                     
                     if hnr_parts:
-                        # Join parts. Usually "51" and "a" -> "51a".
-                        # Sometimes they might be duplicate? No, iter visits each node once.
-                        # Assuming order is document order: 51 then a.
-                        hnr_text = "".join(hnr_parts)
+                        hnr_text = hnr_parts[0]
+                        for part in hnr_parts[1:]:
+                            if part.lower().startswith("haus"):
+                                hnr_text += f", {part}"
+                            else:
+                                hnr_text += part
                     else:
                         hnr_text = None
                     
