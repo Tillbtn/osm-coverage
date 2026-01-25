@@ -457,7 +457,8 @@ def main():
             # Count corrections
             d_corrections = 0
             if 'correction_type' in district_alkis.columns:
-                 d_corrections = district_alkis['correction_type'].notna().sum()
+                 # Count only corrections that result in a match
+                 d_corrections = int((district_alkis['correction_type'].notna() & district_alkis['found_in_osm']).sum())
 
             d_stats = {
                 "name": unique_name,
@@ -489,47 +490,47 @@ def main():
             
             # History Adjustment (District)
             if args.adjust_history and d_hist:
-                # Always compare against the last entry in the history file.
-                # If the user ran a normal update today (establishing a baseline including OSM progress),
-                # and then runs --adjust-history after applying corrections, this will correctly
-                # isolate the 'correction delta' and back-propagate ONLY that.
-                # If the user jumps a day (Yesterday -> Today Adjusted), it back-propagates (OSM + Correction),
-                # which is the accepted trade-off.
-                
                 ref_entry = d_hist[-1]
                 
-                # Warning if we are adjusting against a different date (e.g. Yesterday)
-                # This implies valid progress today will be flattened.
                 if ref_entry["date"] != export_date:
                     print(f"      [Info] Adjusting against previous date ({ref_entry['date']}). Today's progress will be flattened to 0 relative to history.")
                     
                 delta_total = d_total - ref_entry["total"]
                 delta_missing = d_missing - ref_entry["missing"]
-                # We can also track delta corrections if we want to validat, but we don't back-propagate it necessarily?
-                # Actually, adding corrections SHOULD be back-propagated if we want "what if we always had this logic".
-                # If we had this logic yesterday, we would have had X corrections yesterday too.
-                # So yes, let's adjust corrections count too if present.
                 delta_corrections = d_corrections - ref_entry.get("corrections", 0)
                 
                 if delta_total != 0 or delta_missing != 0:
                     print(f"      [Adjust] District '{district}': Delta Total={delta_total}, Delta Missing={delta_missing}, Delta Corrections={delta_corrections}")
                     
-                    # Adjust ALL history entries
                     for h_entry in d_hist:
                         h_entry["total"] += delta_total
                         h_entry["missing"] += delta_missing
                         if "corrections" in h_entry:
                              h_entry["corrections"] += delta_corrections
                         else:
-                             # If corrections didn't exist in history, we can't really "add" to it safely without base.
-                             # But we can assume it was 0? Or just set it to current?
-                             # Let's leave it alone if missing to avoid breaking schema or just init to delta.
-                             h_entry["corrections"] = max(0, delta_corrections) # Estimate
+                             h_entry["corrections"] = max(0, delta_corrections)
 
-                        # Recalculate coverage
                         ht = h_entry["total"]
                         hm = h_entry["missing"]
                         h_entry["coverage"] = round((ht - hm) / ht * 100, 1) if ht > 0 else 100.0
+
+            elif not args.adjust_history and d_hist:
+                 ref_entry = d_hist[-1]
+                 prev_corrs = ref_entry.get("corrections", 0)
+                 delta_corrs = d_corrections - prev_corrs
+                 
+                 if delta_corrs > 0:
+                     print(f"      [Auto-Adjust] District '{district}': {delta_corrs} new corrections.")
+                     for h_entry in d_hist:
+                         h_entry["missing"] -= delta_corrs
+                         if h_entry["missing"] < 0: h_entry["missing"] = 0
+                         
+                         if "corrections" in h_entry:
+                             h_entry["corrections"] += delta_corrs
+                         
+                         ht = h_entry["total"]
+                         hm = h_entry["missing"]
+                         h_entry["coverage"] = round((ht - hm) / ht * 100, 1) if ht > 0 else 100.0
 
             if not d_hist or d_hist[-1]["date"] != export_date:
                 d_hist.append(d_hist_entry)
@@ -575,7 +576,8 @@ def main():
         # alkis dataframe has everything.
         global_corrections = 0
         if 'correction_type' in alkis.columns:
-             global_corrections = alkis['correction_type'].notna().sum()
+             # Count only corrections that result in a match
+             global_corrections = int((alkis['correction_type'].notna() & alkis['found_in_osm']).sum())
 
         g_entry = {
              "date": export_date,
