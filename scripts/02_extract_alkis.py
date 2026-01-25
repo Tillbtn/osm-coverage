@@ -9,6 +9,8 @@ import re
 import numpy as np 
 from shapely.geometry import Point 
 import hashlib 
+import osmium
+from shapely import wkb
 
 # Configuration
 DATA_DIR = "data"
@@ -84,7 +86,7 @@ def split_alkis_address_string(original_street, original_hnr_string, extra_separ
         else:
             results.append((current_street, part))
             
-    return results
+    return resultsdefault
 
 def expand_complex_addresses(df, extra_separators=None, desc="Splitting Addresses"):
     """
@@ -256,6 +258,57 @@ def normalize_columns(gdf):
                 gdf['geometry'] = gdf.geometry.centroid
         
     return gdf[['street', 'housenumber', 'postcode', 'city', 'geometry']]
+
+
+class DistrictHandler(osmium.SimpleHandler):
+    def __init__(self):
+        super(DistrictHandler, self).__init__()
+        self.boundaries = []
+        self.wkbfab = osmium.geom.WKBFactory()
+
+    def area(self, a):
+        try:
+            if 'boundary' in a.tags and a.tags['boundary'] == 'administrative':
+                if a.tags.get('admin_level') == '10':
+                    wkb_data = self.wkbfab.create_multipolygon(a)
+                    name = a.tags.get('name')
+                    if name:
+                        self.boundaries.append({'name': name, 'wkb': wkb_data})
+        except:
+            pass
+
+def extract_osm_boundaries(pbf_path):
+    print(f"[HH] Extracting district boundaries from {pbf_path}...")
+    handler = DistrictHandler()
+    am = osmium.area.AreaManager()
+    
+    # 2-pass approach generally required for Relations -> Areas
+    try:
+        reader1 = osmium.io.Reader(pbf_path)
+        osmium.apply(reader1, am.first_pass_handler())
+        reader1.close()
+
+        reader2 = osmium.io.Reader(pbf_path)
+        # build geometries for node locations
+        idx = osmium.index.create_map("sparse_file_array")
+        lh = osmium.NodeLocationsForWays(idx)
+        lh.ignore_errors()
+        
+        osmium.apply(reader2, lh, handler, am.second_pass_handler(handler))
+        reader2.close()
+    except Exception as e:
+        print(f"[HH] Error reading OSM PBF: {e}")
+        return None
+    
+    if not handler.boundaries:
+        print("[HH] No boundaries found in OSM PBF.")
+        return None
+
+    df = pd.DataFrame(handler.boundaries)
+    df['geometry'] = df['wkb'].apply(lambda x: wkb.loads(x, hex=True))
+    gdf = gpd.GeoDataFrame(df, geometry='geometry', crs="EPSG:4326")
+    gdf = gdf.to_crs("EPSG:25832")
+    return gdf
 
 
 def process_state(state_name, state_dir, process_func):
@@ -532,6 +585,7 @@ def process_hh(directory):
     
     # 1. Check for GML files directly
     gmls = glob.glob(os.path.join(directory, "*.gml"))
+    gmls += glob.glob(os.path.join(directory, "*.GML"))
     
     # 2. Check for ZIP
     if not gmls:
@@ -652,10 +706,12 @@ def process_hh(directory):
                              hnr_parts.append(node.text.strip())
                     
                     if hnr_parts:
-                        # Join parts. Usually "51" and "a" -> "51a".
-                        # Sometimes they might be duplicate? No, iter visits each node once.
-                        # Assuming order is document order: 51 then a.
-                        hnr_text = "".join(hnr_parts)
+                        hnr_text = hnr_parts[0]
+                        for part in hnr_parts[1:]:
+                            if part.lower().startswith("haus"):
+                                hnr_text += f", {part}"
+                            else:
+                                hnr_text += part
                     else:
                         hnr_text = None
                     
@@ -748,7 +804,40 @@ def process_hh(directory):
                 if x_sample < 180:
                     gdf.set_crs("EPSG:4258", inplace=True, allow_override=True)
                     gdf = gdf.to_crs("EPSG:25832")
+            
+            # Spatial Join with Districts
+            # Load OSM boundaries
+            pbf_path = os.path.join(directory, "osm", "hamburg-latest.osm.pbf")
+            if not os.path.exists(pbf_path):
+                 pbf_path = os.path.join(os.path.dirname(directory), "hh", "osm", "hamburg-latest.osm.pbf")
+            
+            districts_gdf = None
+            pbf_path = os.path.join(os.path.dirname(directory), "osm", "hamburg-latest.osm.pbf")
+            
+            if os.path.exists(pbf_path):
+                districts_gdf = extract_osm_boundaries(pbf_path)
                 
+            if districts_gdf is not None and not districts_gdf.empty:
+                print(f"[HH] Assigning districts using {len(districts_gdf)} polygons...")
+                # sjoin
+                # Ensure same CRS
+                if gdf.crs != districts_gdf.crs:
+                    districts_gdf = districts_gdf.to_crs(gdf.crs)
+                
+                joined = gpd.sjoin(gdf, districts_gdf[['geometry', 'name']], how='left', predicate='intersects')
+                
+                # Update district column
+                # If match found, use 'name' from index_right
+                joined['district'] = joined['name'].fillna('kein Stadtteil gefunden')
+                
+                # Cleanup sjoin columns
+                if 'index_right' in joined.columns: del joined['index_right']
+                if 'name' in joined.columns: del joined['name']
+                
+                gdf = joined
+            else:
+                 print("[HH] No district boundaries found for address")
+
             gdf['state'] = 'Hamburg'
             results.append(gdf)
             
