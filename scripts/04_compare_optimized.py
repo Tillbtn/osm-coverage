@@ -8,6 +8,7 @@ import osmium
 import re
 import numpy as np
 import tqdm
+import argparse
 
 def normalize_key(street, hnr):
     s = str(street).lower()
@@ -293,10 +294,15 @@ def expand_address_ranges(df):
     return df
 
 def main():
-    STATES_LIST = ["nds", "nrw", "rlp", "bb", "hh", "he"]
+    # STATES_LIST = ["nds", "nrw", "rlp", "bb", "hh", "he", "mv"]
+    STATES_LIST = ["nds"]
     
     DATA_DIR = "data"
     SITE_DIR = "site/public/states"
+
+    parser = argparse.ArgumentParser(description="Compare ALKIS and OSM data.")
+    parser.add_argument("--adjust-history", action="store_true", help="Adjust historical statistics based on the delta from the current run.")
+    args = parser.parse_args()
     
     today = datetime.date.today().isoformat()
     
@@ -448,6 +454,11 @@ def main():
             clean_name = "".join([c if c.isalnum() else "_" for c in str(district)])
             out_filename = f"{clean_name}.geojson" 
             
+            # Count corrections
+            d_corrections = 0
+            if 'correction_type' in district_alkis.columns:
+                 d_corrections = district_alkis['correction_type'].notna().sum()
+
             d_stats = {
                 "name": unique_name,
                 "state": state,
@@ -455,6 +466,7 @@ def main():
                 "total": d_total,
                 "missing": d_missing,
                 "coverage": d_coverage,
+                "corrections": int(d_corrections),
                 "path": f"states/{state}/districts/{out_filename}",
                 "filename": out_filename
             }
@@ -466,13 +478,59 @@ def main():
                 "date": export_date,
                 "total": d_total,
                 "missing": d_missing,
-                "coverage": d_coverage
+                "coverage": d_coverage,
+                "corrections": int(d_corrections)
             }
             
             if hist_key not in history_store["districts"]:
                 history_store["districts"][hist_key] = []
             
             d_hist = history_store["districts"][hist_key]
+            
+            # History Adjustment (District)
+            if args.adjust_history and d_hist:
+                # Always compare against the last entry in the history file.
+                # If the user ran a normal update today (establishing a baseline including OSM progress),
+                # and then runs --adjust-history after applying corrections, this will correctly
+                # isolate the 'correction delta' and back-propagate ONLY that.
+                # If the user jumps a day (Yesterday -> Today Adjusted), it back-propagates (OSM + Correction),
+                # which is the accepted trade-off.
+                
+                ref_entry = d_hist[-1]
+                
+                # Warning if we are adjusting against a different date (e.g. Yesterday)
+                # This implies valid progress today will be flattened.
+                if ref_entry["date"] != export_date:
+                    print(f"      [Info] Adjusting against previous date ({ref_entry['date']}). Today's progress will be flattened to 0 relative to history.")
+                    
+                delta_total = d_total - ref_entry["total"]
+                delta_missing = d_missing - ref_entry["missing"]
+                # We can also track delta corrections if we want to validat, but we don't back-propagate it necessarily?
+                # Actually, adding corrections SHOULD be back-propagated if we want "what if we always had this logic".
+                # If we had this logic yesterday, we would have had X corrections yesterday too.
+                # So yes, let's adjust corrections count too if present.
+                delta_corrections = d_corrections - ref_entry.get("corrections", 0)
+                
+                if delta_total != 0 or delta_missing != 0:
+                    print(f"      [Adjust] District '{district}': Delta Total={delta_total}, Delta Missing={delta_missing}, Delta Corrections={delta_corrections}")
+                    
+                    # Adjust ALL history entries
+                    for h_entry in d_hist:
+                        h_entry["total"] += delta_total
+                        h_entry["missing"] += delta_missing
+                        if "corrections" in h_entry:
+                             h_entry["corrections"] += delta_corrections
+                        else:
+                             # If corrections didn't exist in history, we can't really "add" to it safely without base.
+                             # But we can assume it was 0? Or just set it to current?
+                             # Let's leave it alone if missing to avoid breaking schema or just init to delta.
+                             h_entry["corrections"] = max(0, delta_corrections) # Estimate
+
+                        # Recalculate coverage
+                        ht = h_entry["total"]
+                        hm = h_entry["missing"]
+                        h_entry["coverage"] = round((ht - hm) / ht * 100, 1) if ht > 0 else 100.0
+
             if not d_hist or d_hist[-1]["date"] != export_date:
                 d_hist.append(d_hist_entry)
             else:
@@ -511,17 +569,111 @@ def main():
 
         # State Global Stats
         global_coverage = round((state_total - state_missing) / state_total * 100, 2) if state_total > 0 else 100.0
+        
+        # Calculate global corrections count by summing district corrections? 
+        # Or checking state alkis dataframe?
+        # alkis dataframe has everything.
+        global_corrections = 0
+        if 'correction_type' in alkis.columns:
+             global_corrections = alkis['correction_type'].notna().sum()
+
         g_entry = {
              "date": export_date,
              "alkis": state_total,
              "osm": state_osm_count,
              "missing": state_missing,
-             "coverage": global_coverage
+             "coverage": global_coverage,
+             "corrections": int(global_corrections)
         }
         
         if not history_store["global"] or history_store["global"][-1]["date"] != export_date:
+            # History Adjustment (Global)
+            
+            # Logic A: Manual Adjustment (Flag) - The Time Machine
+            # Captures ALL deltas (Total, Missing, Corrections). Used for Big Changes (Logic, Splits).
+            if args.adjust_history and history_store["global"]:
+                 ref_entry = history_store["global"][-1]
+                 delta_total = state_total - ref_entry["alkis"]
+                 delta_missing = state_missing - ref_entry["missing"]
+                 delta_corrections = global_corrections - ref_entry.get("corrections", 0)
+                 
+                 if delta_total != 0 or delta_missing != 0:
+                     print(f"[{state}] Global Adjustment (Flag): Delta Total={delta_total}, Delta Missing={delta_missing}, Delta Corrections={delta_corrections}")
+                     for h_entry in history_store["global"]:
+                         h_entry["alkis"] += delta_total
+                         h_entry["missing"] += delta_missing
+                         
+                         if "corrections" in h_entry:
+                             h_entry["corrections"] += delta_corrections
+                         else:
+                             h_entry["corrections"] = max(0, delta_corrections)
+                             
+                         ht = h_entry["alkis"]
+                         hm = h_entry["missing"]
+                         h_entry["coverage"] = round((ht - hm) / ht * 100, 2) if ht > 0 else 100.0
+            
+            # Logic B: Auto-Adjustment for Corrections - The "Lazy" Enhancer
+            # If we are NOT manually adjusting, but we see 'corrections' count increased.
+            # We assume these new corrections would have matched in the past too.
+            # We move them from 'Missing' to 'Found'. Total stays the same.
+            elif not args.adjust_history and history_store["global"]:
+                 ref_entry = history_store["global"][-1]
+                 # Look strictly at correction delta
+                 prev_corrs = ref_entry.get("corrections", 0)
+                 delta_corrs = global_corrections - prev_corrs
+                 
+                 # Only if positive increase (we identified NEW matches via corrections)
+                 if delta_corrs > 0:
+                     print(f"[{state}] Auto-Adjusting History for {delta_corrs} new corrections.")
+                     for h_entry in history_store["global"]:
+                         # We assume these X corrections were previously counted as 'Missing'.
+                         # So we subtract X from Missing.
+                         # And inherently 'Found' (Alkis - Missing) increases.
+                         # Alkis Total does NOT change (Corrections usually map existing items).
+                         
+                         h_entry["missing"] -= delta_corrs
+                         # Don't let missing go below 0 (sanity check)
+                         if h_entry["missing"] < 0: h_entry["missing"] = 0
+                         
+                         # Update tracked correction count if present
+                         if "corrections" in h_entry:
+                             h_entry["corrections"] += delta_corrs
+                         
+                         # Recalculate
+                         ht = h_entry["alkis"]
+                         hm = h_entry["missing"]
+                         h_entry["coverage"] = round((ht - hm) / ht * 100, 2) if ht > 0 else 100.0
+
             history_store["global"].append(g_entry)
         else:
+            # Entry exists for today (we are overwriting it).
+            # If adjusting, we still compare against the last entry in the list (which IS today's entry before overwrite)
+            # This allows correcting a run from earlier today.
+            
+            if args.adjust_history and history_store["global"]:
+                 ref_entry = history_store["global"][-1]
+                 delta_total = state_total - ref_entry["alkis"]
+                 delta_missing = state_missing - ref_entry["missing"]
+                 delta_corrections = global_corrections - ref_entry.get("corrections", 0)
+
+                 if delta_total != 0 or delta_missing != 0:
+                     print(f"[{state}] Global Adjustment (Overwrite): Delta Total={delta_total}, Delta Missing={delta_missing}, Delta Corrections={delta_corrections}")
+                     # Adjust ALL entries. Even the last one (which gets overwritten).
+                     # Crucially, we adjust the ones BEFORE it.
+                     for h_entry in history_store["global"]: 
+                         # Note: loop over all including [-1]. It's fine.
+                         h_entry["alkis"] += delta_total
+                         h_entry["missing"] += delta_missing
+                         
+                         if "corrections" in h_entry:
+                             h_entry["corrections"] += delta_corrections
+                         else:
+                             h_entry["corrections"] = max(0, delta_corrections)
+
+                         ht = h_entry["alkis"]
+                         hm = h_entry["missing"]
+                         h_entry["coverage"] = round((ht - hm) / ht * 100, 2) if ht > 0 else 100.0
+
             history_store["global"][-1] = g_entry
             
         # Write State Files
