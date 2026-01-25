@@ -525,9 +525,17 @@ def main():
                          h_entry["missing"] -= delta_corrs
                          if h_entry["missing"] < 0: h_entry["missing"] = 0
                          
-                         if "corrections" in h_entry:
-                             h_entry["corrections"] += delta_corrs
+                         current_corrs = h_entry.get("corrections", 0)
                          
+                         # Ensure 'corrections' key exists so it appears before 'original_corrections'
+                         if "corrections" not in h_entry:
+                             h_entry["corrections"] = current_corrs
+
+                         if "original_corrections" not in h_entry:
+                             h_entry["original_corrections"] = current_corrs
+                             
+                         h_entry["corrections"] = current_corrs + delta_corrs
+                             
                          ht = h_entry["total"]
                          hm = h_entry["missing"]
                          h_entry["coverage"] = round((ht - hm) / ht * 100, 1) if ht > 0 else 100.0
@@ -605,10 +613,16 @@ def main():
                          h_entry["alkis"] += delta_total
                          h_entry["missing"] += delta_missing
                          
-                         if "corrections" in h_entry:
-                             h_entry["corrections"] += delta_corrections
-                         else:
-                             h_entry["corrections"] = max(0, delta_corrections)
+                         current_corrs = h_entry.get("corrections", 0)
+                         
+                         # Ensure 'corrections' key exists so it appears before 'original_corrections'
+                         if "corrections" not in h_entry:
+                             h_entry["corrections"] = current_corrs
+
+                         if "original_corrections" not in h_entry:
+                             h_entry["original_corrections"] = current_corrs
+                             
+                         h_entry["corrections"] = current_corrs + delta_corrections
                              
                          ht = h_entry["alkis"]
                          hm = h_entry["missing"]
