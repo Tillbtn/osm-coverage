@@ -45,8 +45,9 @@ STATES = {
 CHUNK_SIZE = 10000  
 
 class AddressHandler(osmium.SimpleHandler):
-    def __init__(self):
+    def __init__(self, state_key=None):
         super(AddressHandler, self).__init__()
+        self.state_key = state_key
         self.buffer = []
         self.chunks = []
         self.wkbfab = osmium.geom.WKBFactory()
@@ -64,10 +65,19 @@ class AddressHandler(osmium.SimpleHandler):
             
             if street_val:
                 try:
+                    hnr = tags['addr:housenumber']
+                    h_name = None
+                    
+                    # Extract 'name' if it starts with 'Haus'
+                    name = tags.get('name')
+                    if name and name.lower().startswith('haus'):
+                            h_name = name
+
                     wkb_data = geom_func(obj)
                     self.buffer.append({
                         'street': street_val,
-                        'housenumber': tags['addr:housenumber'],
+                        'housenumber': hnr,
+                        'housename': h_name,
                         # 'postcode': tags.get('addr:postcode', ''), 
                         'city': tags.get('addr:city', ''),
                         'wkb': wkb_data
@@ -175,7 +185,7 @@ def process_state(state_key, config):
             return
 
     print(f"[{state_key}] Extracting addresses from PBF in chunks of {CHUNK_SIZE}...")
-    handler = AddressHandler()
+    handler = AddressHandler(state_key=state_key)
     
     try:
         am = osmium.area.AreaManager()
