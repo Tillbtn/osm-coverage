@@ -14,6 +14,7 @@ def normalize_key(street, hnr):
     s = str(street).lower()
     s = re.sub(r'\(.*?\)', '', s)
     s = s.replace("ß", "ss")
+    s = s.replace("v.", "von")
     s = s.replace("bgm.", "bürgermeister")
     s = s.replace("bgm", "bürgermeister")
     s = s.replace("bürgerm.", "bürgermeister")
@@ -509,12 +510,12 @@ def main():
             if d_hist:
                 ref_entry = d_hist[-1]
                 
-                # Calculate basic deltas
+                # Calculate deltas
                 delta_total = d_total - ref_entry["total"]
                 delta_missing = d_missing - ref_entry["missing"]
                 delta_corrections = d_corrections - ref_entry.get("corrections", 0)
                 
-                # User Requirement: Correction changes should ALWAYS propagate to past.
+                #Correction changes should always propagate to past
                 if delta_corrections != 0:
                      print(f"      [Auto-Adjust] District '{district}': {delta_corrections} correction change propagated.")
                      for h_entry in d_hist:
@@ -535,13 +536,13 @@ def main():
                          hm = h_entry["missing"]
                          h_entry["coverage"] = round((ht - hm) / ht * 100, 1) if ht > 0 else 100.0
 
-                # Manual Flag - The Time Machine
-                # Adjusts Total and Missing based on logic shifts (Python code changes).
+                # Manual Flag
+                # Adjusts Total and Missing based on logic shifts (processing changes).
                 if args.adjust_history:
                     if ref_entry["date"] != export_date:
                         print(f"      [Info] Adjusting against previous date ({ref_entry['date']}). Today's progress will be flattened to 0 relative to history.")
                     
-                    # We subtract delta_corrections from delta_missing logic check because we ALREADY applied it above.
+                    # subtract delta_corrections from delta_missing logic check because we already applied it above.
                     residual_missing = delta_missing + delta_corrections 
                     
                     if delta_total != 0 or residual_missing != 0:
@@ -595,9 +596,6 @@ def main():
         # State Global Stats
         global_coverage = round((state_total - state_missing) / state_total * 100, 2) if state_total > 0 else 100.0
         
-        # Calculate global corrections count by summing district corrections? 
-        # Or checking state alkis dataframe?
-        # alkis dataframe has everything.
         global_corrections = 0
         if 'correction_type' in alkis.columns:
              # Count only corrections that result in a match
@@ -631,8 +629,6 @@ def main():
                          
                          h_entry["corrections"] = current_corrs + delta_corrections
                          
-                         # Check if we should update missing count too?
-                         # Yes, if corrections increased, we assume missing decreases.
                          h_entry["missing"] -= delta_corrections
                          if h_entry["missing"] < 0: h_entry["missing"] = 0
                          
@@ -660,7 +656,7 @@ def main():
             history_store["global"].append(g_entry)
         else:
             # Entry exists for today (we are overwriting it).
-            # If adjusting, we still compare against the last entry in the list (which IS today's entry before overwrite)
+            # If adjusting, we still compare against the last entry in the list (which is today's entry before overwrite)
             # This allows correcting a run from earlier today.
             
             if args.adjust_history and history_store["global"]:
@@ -671,10 +667,7 @@ def main():
 
                  if delta_total != 0 or delta_missing != 0:
                      print(f"[{state}] Global Adjustment (Overwrite): Delta Total={delta_total}, Delta Missing={delta_missing}, Delta Corrections={delta_corrections}")
-                     # Adjust ALL entries. Even the last one (which gets overwritten).
-                     # Crucially, we adjust the ones BEFORE it.
                      for h_entry in history_store["global"]: 
-                         # Note: loop over all including [-1]. It's fine.
                          h_entry["alkis"] += delta_total
                          h_entry["missing"] += delta_missing
                          
