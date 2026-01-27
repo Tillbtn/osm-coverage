@@ -181,7 +181,15 @@ class CorrectionModal {
         if (type === 'street') {
             correction.from_street = this.street;
             correction.city = currentDistrictName;
-            correction.to_street = this.inputStreetAll.value;
+
+            const toStreet = this.inputStreetAll.value.trim();
+            if (!toStreet) {
+                this.msgDiv.textContent = 'Korrigierter Straßenname fehlt.';
+                this.msgDiv.style.color = '#ef4444';
+                return;
+            }
+            correction.to_street = toStreet;
+
             if (this.alkisId) {
                 correction.reference_alkis_id = this.alkisId;
             }
@@ -194,6 +202,12 @@ class CorrectionModal {
             if (type === 'single') {
                 const newStreet = this.inputSingleStreet.value.trim();
                 const newHnr = this.inputSingleHnr.value.trim();
+
+                if (!newStreet || !newHnr) {
+                    this.msgDiv.textContent = 'Straße und Hausnummer dürfen nicht leer sein.';
+                    this.msgDiv.style.color = '#ef4444';
+                    return;
+                }
 
                 if (newStreet === this.street && newHnr === this.hnr) {
                     this.msgDiv.textContent = 'Bitte korrigierte Adresse eingeben.';
@@ -388,7 +402,9 @@ function loadDistrict(name) {
                     // If matched but no correction_type: Green (#10b981)
 
                     if (props && isValid(props.correction_type)) {
-                        if (props.matched) {
+                        if (props.correction_type === 'ignored') {
+                            fillColor = "#9ca3af"; // Gray for ignored
+                        } else if (props.matched) {
                             fillColor = "#3b82f6"; // Blue for corrected matches
                         } else {
                             fillColor = "#8b5cf6"; // Purple for corrected but unmatched
@@ -420,13 +436,23 @@ function loadDistrict(name) {
 
                         let title = "Fehlt in OSM:";
                         if (isMatched) {
-                            title = "Abweichung vom ALKIS:";
+                            if (feature.properties.correction_type === 'ignored') {
+                                title = "Ignoriert:";
+                            } else {
+                                title = "Abweichung vom ALKIS:";
+                            }
                         }
 
                         const container = document.createElement('div');
                         let content = "";
 
-                        if (isMatched && (feature.properties.original_street || feature.properties.original_housenumber)) {
+                        if (feature.properties.correction_type === 'ignored') {
+                            content = `<strong>${title}</strong><br>
+                                        <div style="margin-bottom: 4px;">
+                                            <span style="color: #666; font-size: 0.9em;">ALKIS:</span><br>
+                                            ${origStreet} ${origHnr}
+                                        </div>`;
+                        } else if (isMatched && (feature.properties.original_street || feature.properties.original_housenumber)) {
                             content = `<strong>${title}</strong><br>
                                         <div style="margin-bottom: 4px;">
                                             <span style="color: #666; font-size: 0.9em;">ALKIS:</span><br>
@@ -481,3 +507,60 @@ function loadDistrict(name) {
             document.getElementById('stats').innerText = 'Fehler beim Laden.';
         });
 }
+
+// Add Legend
+const legend = L.control({ position: 'bottomleft' });
+
+legend.onAdd = function (map) {
+    const container = L.DomUtil.create('div', 'info legend');
+    container.style.background = '#3b82f6';
+    container.style.color = 'white';
+    container.style.padding = '8px 12px';
+    container.style.borderRadius = '5px';
+    container.style.boxShadow = '0 0 15px rgba(0,0,0,0.2)';
+    container.style.cursor = 'pointer';
+
+    // Stop click propagation to map
+    L.DomEvent.disableClickPropagation(container);
+
+    // Title / Button
+    const title = L.DomUtil.create('div', '', container);
+    title.innerHTML = '<span style="font-size: 0.8em">▼</span>';
+    title.style.fontSize = '14px';
+    title.style.userSelect = 'none';
+
+    // Content (Hidden by default)
+    const content = L.DomUtil.create('div', '', container);
+    content.style.display = 'none';
+    content.style.marginTop = '10px';
+    content.style.fontSize = '12px';
+    content.style.lineHeight = '1.5';
+
+    content.innerHTML = `
+        <div><span style="display:inline-block;width:10px;height:10px;background:#ff4444;border-radius:50%;margin-right:5px;"></span> Existiert im ALKIS, fehlt in OSM</div>
+        <div><span style="display:inline-block;width:10px;height:10px;background:#3b82f6;border-radius:50%;margin-right:5px;"></span> ALKIS korrigiert, deshalb in OSM gefunden</div>
+        <div><span style="display:inline-block;width:10px;height:10px;background:#8b5cf6;border-radius:50%;margin-right:5px;"></span> ALKIS korrigiert, nicht in OSM gefunden</div>
+        <div><span style="display:inline-block;width:10px;height:10px;background:#9ca3af;border-radius:50%;margin-right:5px;"></span> ALKIS ignoriert</div>
+    `;
+
+    // Toggle Logic
+    let expanded = false;
+    container.onclick = function () {
+        expanded = !expanded;
+        if (expanded) {
+            content.style.display = 'block';
+            title.innerHTML = '<strong>Legende</strong> <span style="font-size: 0.8em">▲</span>';
+            container.style.background = 'white';
+            container.style.color = 'black';
+        } else {
+            content.style.display = 'none';
+            title.innerHTML = '<span style="font-size: 0.8em">▼</span>';
+            container.style.background = '#3b82f6';
+            container.style.color = 'white';
+        }
+    };
+
+    return container;
+};
+
+legend.addTo(map);

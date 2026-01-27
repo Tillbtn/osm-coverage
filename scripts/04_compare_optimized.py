@@ -100,17 +100,22 @@ def apply_corrections(alkis_df, corrections_file, state):
                  alkis_df.loc[mask_orig_hnr_nan, 'original_housenumber'] = alkis_df.loc[mask_orig_hnr_nan, 'housenumber']
             
             # Apply changes
-            if "to_street" in corr:
-                alkis_df.loc[mask, 'street'] = corr["to_street"]
-                alkis_df.loc[mask, 'correction_type'] = tag
+            if corr.get("ignore"):
+                alkis_df.loc[mask, 'correction_type'] = 'ignored'
                 if comment:
                     alkis_df.loc[mask, 'correction_comment'] = comment
-                
-            if "to_housenumber" in corr:
-                alkis_df.loc[mask, 'housenumber'] = corr["to_housenumber"]
-                alkis_df.loc[mask, 'correction_type'] = tag
-                if comment:
-                    alkis_df.loc[mask, 'correction_comment'] = comment
+            else:
+                if "to_street" in corr:
+                    alkis_df.loc[mask, 'street'] = corr["to_street"]
+                    alkis_df.loc[mask, 'correction_type'] = tag
+                    if comment:
+                        alkis_df.loc[mask, 'correction_comment'] = comment
+                    
+                if "to_housenumber" in corr:
+                    alkis_df.loc[mask, 'housenumber'] = corr["to_housenumber"]
+                    alkis_df.loc[mask, 'correction_type'] = tag
+                    if comment:
+                        alkis_df.loc[mask, 'correction_comment'] = comment
                     
         elif from_street:
             mask = alkis_df['street'] == from_street
@@ -157,17 +162,22 @@ def apply_corrections(alkis_df, corrections_file, state):
             count += rows_affected
             
             # Apply changes
-            if "to_street" in corr:
-                alkis_df.loc[mask, 'street'] = corr["to_street"]
-                alkis_df.loc[mask, 'correction_type'] = tag
+            if corr.get("ignore"):
+                alkis_df.loc[mask, 'correction_type'] = 'ignored'
                 if comment:
                     alkis_df.loc[mask, 'correction_comment'] = comment
+            else:
+                if "to_street" in corr:
+                    alkis_df.loc[mask, 'street'] = corr["to_street"]
+                    alkis_df.loc[mask, 'correction_type'] = tag
+                    if comment:
+                        alkis_df.loc[mask, 'correction_comment'] = comment
                 
-            if "to_housenumber" in corr:
-                alkis_df.loc[mask, 'housenumber'] = corr["to_housenumber"]
-                alkis_df.loc[mask, 'correction_type'] = tag
-                if comment:
-                    alkis_df.loc[mask, 'correction_comment'] = comment
+                if "to_housenumber" in corr:
+                    alkis_df.loc[mask, 'housenumber'] = corr["to_housenumber"]
+                    alkis_df.loc[mask, 'correction_type'] = tag
+                    if comment:
+                        alkis_df.loc[mask, 'correction_comment'] = comment
 
         elif replace_in_street:
             replace_with = corr.get("replace_with", "")
@@ -186,13 +196,16 @@ def apply_corrections(alkis_df, corrections_file, state):
                      alkis_df.loc[mask_no_orig, 'original_street'] = alkis_df.loc[mask_no_orig, 'street']
                 
                 count += rows_affected
-                alkis_df.loc[mask, 'street'] = alkis_df.loc[mask, 'street'].str.replace(replace_in_street, replace_with, regex=False)
-                alkis_df.loc[mask, 'correction_type'] = tag
-                if comment:
-                    alkis_df.loc[mask, 'correction_comment'] = comment
                 count += rows_affected
-                alkis_df.loc[mask, 'street'] = alkis_df.loc[mask, 'street'].str.replace(replace_in_street, replace_with, regex=False)
-                alkis_df.loc[mask, 'correction_type'] = tag
+                if corr.get("ignore"):
+                     alkis_df.loc[mask, 'correction_type'] = 'ignored'
+                     if comment:
+                         alkis_df.loc[mask, 'correction_comment'] = comment
+                else: 
+                     alkis_df.loc[mask, 'street'] = alkis_df.loc[mask, 'street'].str.replace(replace_in_street, replace_with, regex=False)
+                     alkis_df.loc[mask, 'correction_type'] = tag
+                     if comment:
+                        alkis_df.loc[mask, 'correction_comment'] = comment
 
     print(f"[{state}] Applied corrections to {count} rows.")
     return alkis_df
@@ -461,7 +474,10 @@ def main():
         
         for district in tqdm.tqdm(districts, desc=f"[{state}] Processing Districts", ascii=True):
             district_alkis = alkis[alkis['district'] == district]
+            # Exclude ignored addresses from missing
             district_missing = district_alkis[~district_alkis['found_in_osm']]
+            if 'correction_type' in district_alkis.columns:
+                 district_missing = district_missing[district_missing['correction_type'] != 'ignored']
             
             d_total = len(district_alkis)
             d_missing = len(district_missing)
@@ -475,8 +491,8 @@ def main():
             # Count corrections
             d_corrections = 0
             if 'correction_type' in district_alkis.columns:
-                 # Count only corrections that result in a match
-                 d_corrections = int((district_alkis['correction_type'].notna() & district_alkis['found_in_osm']).sum())
+                 # Count corrections that result in a match or are ignored
+                 d_corrections = int(((district_alkis['correction_type'].notna() & district_alkis['found_in_osm']) | (district_alkis['correction_type'] == 'ignored')).sum())
 
             d_stats = {
                 "name": unique_name,
@@ -563,7 +579,12 @@ def main():
                 d_hist[-1] = d_hist_entry
                 
             # GeoJSON Export
-            matches_corrected = district_alkis[district_alkis['found_in_osm'] & district_alkis['correction_type'].notna()].copy()
+            matches_corrected = pd.DataFrame()
+            if 'correction_type' in district_alkis.columns:
+                matches_corrected = district_alkis[
+                    (district_alkis['found_in_osm'] & district_alkis['correction_type'].notna()) |
+                    (district_alkis['correction_type'] == 'ignored')
+                ].copy()
             matches_corrected['matched'] = True
             
             # Combine missing with corrected matches
@@ -598,8 +619,8 @@ def main():
         
         global_corrections = 0
         if 'correction_type' in alkis.columns:
-             # Count only corrections that result in a match
-             global_corrections = int((alkis['correction_type'].notna() & alkis['found_in_osm']).sum())
+             # Count corrections that result in a match or are ignored
+             global_corrections = int(((alkis['correction_type'].notna() & alkis['found_in_osm']) | (alkis['correction_type'] == 'ignored')).sum())
 
         g_entry = {
              "date": export_date,
