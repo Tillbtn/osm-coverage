@@ -188,6 +188,11 @@ class CorrectionModal {
                 this.msgDiv.style.color = '#ef4444';
                 return;
             }
+            if (toStreet === this.street) {
+                this.msgDiv.textContent = 'Bitte korrigierten Straßennamen eingeben.';
+                this.msgDiv.style.color = '#ef4444';
+                return;
+            }
             correction.to_street = toStreet;
 
             if (this.alkisId) {
