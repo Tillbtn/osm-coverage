@@ -22,6 +22,7 @@ let currentDistrictName = "";
 // Configuration from URL or Body
 const params = new URLSearchParams(window.location.search);
 const stateFromUrl = params.get('state');
+const districtFromUrl = params.get('district');
 const state = stateFromUrl || document.body.dataset.state;
 
 const config = STATE_CONFIG[state] || { center: [51.16, 10.45], zoom: 6, name: "Deutschland" };
@@ -302,6 +303,12 @@ Promise.all([
     // Init State Select
     const stateSelect = document.getElementById('stateSelect');
     if (stateSelect) {
+        // Add Default Option
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = "";
+        defaultOpt.textContent = "Deutschland";
+        stateSelect.appendChild(defaultOpt);
+
         Object.entries(STATE_CONFIG).forEach(([key, conf]) => {
             const opt = document.createElement('option');
             opt.value = key;
@@ -316,6 +323,8 @@ Promise.all([
         stateSelect.addEventListener('change', (e) => {
             if (e.target.value) {
                 window.location.href = `addresses.html?state=${e.target.value}`;
+            } else {
+                window.location.href = `addresses.html`;
             }
         });
     }
@@ -338,7 +347,49 @@ Promise.all([
     }
 
     // Initial Load
-    loadDistrict("Global");
+    const foundDistrict = districtFromUrl ? districts.find(d => d.name.toLowerCase() === districtFromUrl.toLowerCase()) : null;
+
+    // Parse Hash
+    const hashParams = window.location.hash.match(/#map=(\d+)\/([\d.-]+)\/([\d.-]+)/);
+    let startView = null;
+    if (hashParams) {
+        startView = {
+            zoom: parseInt(hashParams[1]),
+            lat: parseFloat(hashParams[2]),
+            lng: parseFloat(hashParams[3])
+        };
+    }
+
+    // Map Events for Hash
+    map.on('moveend zoomend', () => {
+        const center = map.getCenter();
+        const zoom = map.getZoom();
+        const hash = `#map=${zoom}/${center.lat.toFixed(5)}/${center.lng.toFixed(5)}`;
+        window.history.replaceState(null, null, window.location.pathname + window.location.search + hash);
+    });
+
+    if (startView) {
+        map.setView([startView.lat, startView.lng], startView.zoom);
+    }
+
+    // Listen to manual hash changes
+    window.addEventListener('hashchange', () => {
+        const hashParams = window.location.hash.match(/#map=(\d+)\/([\d.-]+)\/([\d.-]+)/);
+        if (hashParams) {
+            const zoom = parseInt(hashParams[1]);
+            const lat = parseFloat(hashParams[2]);
+            const lng = parseFloat(hashParams[3]);
+            map.setView([lat, lng], zoom);
+        }
+    });
+
+    if (foundDistrict) {
+        const sel = document.getElementById('districtSelect');
+        if (sel) sel.value = foundDistrict.name;
+        loadDistrict(foundDistrict.name, !!startView);
+    } else {
+        loadDistrict("Global", !!startView);
+    }
 
 }).catch(err => {
     console.error("Init Error:", err);
@@ -351,14 +402,29 @@ function isValid(val) {
     return val !== null && val !== undefined && val !== "<NA>" && val !== "nan" && val !== "";
 }
 
-function loadDistrict(name) {
+function loadDistrict(name, preserveView = false) {
     if (currentLayer) map.removeLayer(currentLayer);
     currentLayer = null;
+
+    // Update URL
+    const historyUrl = new URL(window.location);
+    const currentParam = historyUrl.searchParams.get('district');
+    const newParam = name === "Global" ? null : name;
+
+    if (currentParam !== newParam) {
+        if (name === "Global") {
+            historyUrl.searchParams.delete('district');
+        } else {
+            historyUrl.searchParams.set('district', name);
+        }
+        window.history.pushState(null, null, historyUrl.toString() + window.location.hash);
+
+    }
 
     if (name === "Global") {
         if (!state) {
             document.getElementById('stats').innerText = "";
-            map.setView([initialLat, initialLng], initialZoom);
+            if (!preserveView) map.setView([initialLat, initialLng], initialZoom);
             return;
         }
         let totalMissing = 0;
@@ -366,13 +432,12 @@ function loadDistrict(name) {
             totalMissing = districtsData.reduce((sum, d) => sum + (d.missing || 0), 0);
         }
         document.getElementById('stats').innerText = `gesamt: ${totalMissing} fehlende Adressen`;
-        map.setView([initialLat, initialLng], initialZoom);
+        if (!preserveView) map.setView([initialLat, initialLng], initialZoom);
         return;
     }
 
     document.getElementById('stats').innerText = `Lade ${name}...`;
     currentDistrictName = name;
-
 
     // Calculate URL
     let url = `/districts/${name}.geojson`; // Fallback (Legacy)
@@ -499,7 +564,7 @@ function loadDistrict(name) {
                 }
             });
             currentLayer.addTo(map);
-            if (data.features.length > 0) {
+            if (data.features.length > 0 && !preserveView) {
                 map.fitBounds(currentLayer.getBounds());
             }
 
