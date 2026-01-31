@@ -1,6 +1,6 @@
 import './style.css';
 import L from 'leaflet';
-import { createMap, createJOSMLink } from './modules/map';
+import { createMap, createJOSMLink, createOSMLink } from './modules/map';
 import { fetchDistricts, fetchHistory, fetchGeoJSON } from './modules/api';
 import { StatsModal } from './modules/StatsModal';
 
@@ -489,72 +489,92 @@ function loadDistrict(name, preserveView = false) {
                 },
                 onEachFeature: function (feature, layer) {
                     if (feature.properties) {
-                        const street = feature.properties.street || '';
-                        const hnr = feature.properties.housenumber || '';
-                        const isMatched = feature.properties.matched;
-                        const comment = isValid(feature.properties.correction_comment) ? feature.properties.correction_comment : '';
-                        const origStreet = feature.properties.original_street || street;
-                        const origHnr = feature.properties.original_housenumber || hnr;
 
-                        const lat = layer.getLatLng().lat;
-                        const lng = layer.getLatLng().lng;
+                        layer.bindPopup(() => {
+                            const street = feature.properties.street || '';
+                            const hnr = feature.properties.housenumber || '';
+                            const isMatched = feature.properties.matched;
+                            const comment = isValid(feature.properties.correction_comment) ? feature.properties.correction_comment : '';
+                            const origStreet = feature.properties.original_street || street;
+                            const origHnr = feature.properties.original_housenumber || hnr;
 
-                        let title = "Fehlt in OSM:";
-                        if (isMatched) {
-                            if (feature.properties.correction_type === 'ignored') {
-                                title = "Ignoriert:";
-                            } else {
-                                title = "Abweichung vom ALKIS:";
+                            const lat = layer.getLatLng().lat;
+                            const lng = layer.getLatLng().lng;
+
+                            let title = "Fehlt in OSM:";
+                            if (isMatched) {
+                                if (feature.properties.correction_type === 'ignored') {
+                                    title = "Ignoriert:";
+                                } else {
+                                    title = "Abweichung vom ALKIS:";
+                                }
                             }
-                        }
 
-                        const container = document.createElement('div');
-                        let content = "";
+                            const container = document.createElement('div');
+                            let content = "";
 
-                        if (feature.properties.correction_type === 'ignored') {
-                            content = `<strong>${title}</strong><br>
-                                        <div style="margin-bottom: 4px;">
-                                            <span style="color: #666; font-size: 0.9em;">ALKIS:</span><br>
-                                            ${origStreet} ${origHnr}
-                                        </div>`;
-                        } else if (isMatched && (feature.properties.original_street || feature.properties.original_housenumber)) {
-                            content = `<strong>${title}</strong><br>
-                                        <div style="margin-bottom: 4px;">
-                                            <span style="color: #666; font-size: 0.9em;">ALKIS:</span><br>
-                                            ${origStreet} ${origHnr}
-                                        </div>
-                                        <div style="margin-bottom: 8px;">
-                                            <span style="color: #666; font-size: 0.9em;">OSM:</span><br>
-                                            ${street} ${hnr}
-                                        </div>`;
-                        } else {
-                            // Standard Display
-                            content = `<strong>${title}</strong><br>${street} ${hnr}<br><br>`;
-                        }
+                            if (feature.properties.correction_type === 'ignored') {
+                                content = `<strong>${title}</strong><br>
+                                            <div style="margin-bottom: 4px;">
+                                                <span style="color: #666; font-size: 0.9em;">ALKIS:</span><br>
+                                                ${origStreet} ${origHnr}
+                                            </div>`;
+                            } else if (isMatched && (feature.properties.original_street || feature.properties.original_housenumber)) {
+                                content = `<strong>${title}</strong><br>
+                                            <div style="margin-bottom: 4px;">
+                                                <span style="color: #666; font-size: 0.9em;">ALKIS:</span><br>
+                                                ${origStreet} ${origHnr}
+                                            </div>
+                                            <div style="margin-bottom: 8px;">
+                                                <span style="color: #666; font-size: 0.9em;">OSM:</span><br>
+                                                ${street} ${hnr}
+                                            </div>`;
+                            } else {
+                                // Standard Display
+                                content = `<strong>${title}</strong><br>${street} ${hnr}<br><br>`;
+                            }
 
-                        // Show comment if valid, regardless of match status
-                        if (comment) {
-                            content += `<div style="font-style: italic; margin-bottom: 5px; color: #555;">${comment}</div>`;
-                        }
+                            // Show comment if valid, regardless of match status
+                            if (comment) {
+                                content += `<div style="font-style: italic; margin-bottom: 5px; color: #555;">${comment}</div>`;
+                            }
 
-                        if (!isMatched) {
-                            content += `<button class="correction-init-btn" style="background: #3b82f6; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.375rem; cursor: pointer; font-weight: 500; width: 100%; margin-bottom: 5px;">ALKIS fehlerhaft?</button>`;
-                        }
+                            if (!isMatched) {
+                                content += `<button class="correction-init-btn" style="background: #3b82f6; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.375rem; cursor: pointer; font-weight: 500; width: 100%; margin-bottom: 5px;">ALKIS fehlerhaft?</button>`;
+                            }
 
-                        container.innerHTML = content;
-                        container.appendChild(createJOSMLink(lat, lng));
+                            // 1. Content
+                            const contentDiv = document.createElement('div');
+                            contentDiv.innerHTML = content;
+                            container.appendChild(contentDiv);
 
-                        // Bind event for modal only if button exists
-                        const btn = container.querySelector('.correction-init-btn');
-                        if (btn) {
-                            btn.addEventListener('click', (e) => {
-                                e.stopPropagation(); // prevent map events
-                                correctionModal.open(street, hnr, feature.properties.alkis_id);
-                                map.closePopup();
-                            });
-                        }
+                            // 2. osm.org Link 
+                            const currentZoom = map.getZoom();
+                            const osmLinkContainer = createOSMLink(lat, lng, currentZoom);
+                            osmLinkContainer.style.display = 'flex';
+                            osmLinkContainer.style.gap = '10px';
+                            container.appendChild(osmLinkContainer);
 
-                        layer.bindPopup(container, { maxWidth: 300 });
+                            // 3. JOSM Link
+                            const linkContainer = document.createElement('div');
+                            linkContainer.style.display = 'flex';
+                            linkContainer.style.gap = '10px';
+                            linkContainer.style.marginTop = '5px';
+
+                            linkContainer.appendChild(createJOSMLink(lat, lng));
+                            container.appendChild(linkContainer);
+
+                            // Bind event for modal only if button exists
+                            const btn = container.querySelector('.correction-init-btn');
+                            if (btn) {
+                                btn.addEventListener('click', (e) => {
+                                    e.stopPropagation(); // prevent map events
+                                    correctionModal.open(street, hnr, feature.properties.alkis_id);
+                                    map.closePopup();
+                                });
+                            }
+                            return container;
+                        }, { maxWidth: 300 });
                     }
                 }
             });
