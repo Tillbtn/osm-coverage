@@ -303,11 +303,6 @@ Promise.all([
     // Init State Select
     const stateSelect = document.getElementById('stateSelect');
     if (stateSelect) {
-        // Add Default Option
-        const defaultOpt = document.createElement('option');
-        defaultOpt.value = "";
-        defaultOpt.textContent = "Deutschland";
-        stateSelect.appendChild(defaultOpt);
 
         Object.entries(STATE_CONFIG).forEach(([key, conf]) => {
             const opt = document.createElement('option');
