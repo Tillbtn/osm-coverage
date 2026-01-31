@@ -303,6 +303,12 @@ Promise.all([
     // Init State Select
     const stateSelect = document.getElementById('stateSelect');
     if (stateSelect) {
+        // Add Default Option
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = "";
+        defaultOpt.textContent = "Deutschland";
+        stateSelect.appendChild(defaultOpt);
+
         Object.entries(STATE_CONFIG).forEach(([key, conf]) => {
             const opt = document.createElement('option');
             opt.value = key;
@@ -317,6 +323,8 @@ Promise.all([
         stateSelect.addEventListener('change', (e) => {
             if (e.target.value) {
                 window.location.href = `addresses.html?state=${e.target.value}`;
+            } else {
+                window.location.href = `addresses.html`;
             }
         });
     }
@@ -364,24 +372,6 @@ function loadDistrict(name) {
     if (currentLayer) map.removeLayer(currentLayer);
     currentLayer = null;
 
-    if (name === "Global") {
-        if (!state) {
-            document.getElementById('stats').innerText = "";
-            map.setView([initialLat, initialLng], initialZoom);
-            return;
-        }
-        let totalMissing = 0;
-        if (districtsData && districtsData.length > 0) {
-            totalMissing = districtsData.reduce((sum, d) => sum + (d.missing || 0), 0);
-        }
-        document.getElementById('stats').innerText = `gesamt: ${totalMissing} fehlende Adressen`;
-        map.setView([initialLat, initialLng], initialZoom);
-        return;
-    }
-
-    document.getElementById('stats').innerText = `Lade ${name}...`;
-    currentDistrictName = name;
-
     // Update URL
     const historyUrl = new URL(window.location);
     const currentParam = historyUrl.searchParams.get('district');
@@ -404,6 +394,23 @@ function loadDistrict(name) {
         }
     }
 
+    if (name === "Global") {
+        if (!state) {
+            document.getElementById('stats').innerText = "";
+            map.setView([initialLat, initialLng], initialZoom);
+            return;
+        }
+        let totalMissing = 0;
+        if (districtsData && districtsData.length > 0) {
+            totalMissing = districtsData.reduce((sum, d) => sum + (d.missing || 0), 0);
+        }
+        document.getElementById('stats').innerText = `gesamt: ${totalMissing} fehlende Adressen`;
+        map.setView([initialLat, initialLng], initialZoom);
+        return;
+    }
+
+    document.getElementById('stats').innerText = `Lade ${name}...`;
+    currentDistrictName = name;
 
     // Calculate URL
     let url = `/districts/${name}.geojson`; // Fallback (Legacy)
