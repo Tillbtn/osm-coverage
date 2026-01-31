@@ -349,12 +349,46 @@ Promise.all([
     // Initial Load
     const foundDistrict = districtFromUrl ? districts.find(d => d.name.toLowerCase() === districtFromUrl.toLowerCase()) : null;
 
+    // Parse Hash
+    const hashParams = window.location.hash.match(/#map=(\d+)\/([\d.-]+)\/([\d.-]+)/);
+    let startView = null;
+    if (hashParams) {
+        startView = {
+            zoom: parseInt(hashParams[1]),
+            lat: parseFloat(hashParams[2]),
+            lng: parseFloat(hashParams[3])
+        };
+    }
+
+    // Map Events for Hash
+    map.on('moveend zoomend', () => {
+        const center = map.getCenter();
+        const zoom = map.getZoom();
+        const hash = `#map=${zoom}/${center.lat.toFixed(5)}/${center.lng.toFixed(5)}`;
+        window.history.replaceState(null, null, window.location.pathname + window.location.search + hash);
+    });
+
+    if (startView) {
+        map.setView([startView.lat, startView.lng], startView.zoom);
+    }
+
+    // Listen to manual hash changes
+    window.addEventListener('hashchange', () => {
+        const hashParams = window.location.hash.match(/#map=(\d+)\/([\d.-]+)\/([\d.-]+)/);
+        if (hashParams) {
+            const zoom = parseInt(hashParams[1]);
+            const lat = parseFloat(hashParams[2]);
+            const lng = parseFloat(hashParams[3]);
+            map.setView([lat, lng], zoom);
+        }
+    });
+
     if (foundDistrict) {
         const sel = document.getElementById('districtSelect');
         if (sel) sel.value = foundDistrict.name;
-        loadDistrict(foundDistrict.name);
+        loadDistrict(foundDistrict.name, !!startView);
     } else {
-        loadDistrict("Global");
+        loadDistrict("Global", !!startView);
     }
 
 }).catch(err => {
@@ -368,7 +402,7 @@ function isValid(val) {
     return val !== null && val !== undefined && val !== "<NA>" && val !== "nan" && val !== "";
 }
 
-function loadDistrict(name) {
+function loadDistrict(name, preserveView = false) {
     if (currentLayer) map.removeLayer(currentLayer);
     currentLayer = null;
 
@@ -383,21 +417,14 @@ function loadDistrict(name) {
         } else {
             historyUrl.searchParams.set('district', name);
         }
+        window.history.pushState(null, null, historyUrl.toString() + window.location.hash);
 
-        // If only case matched (canonicalization), use replaceState. Otherwise pushState.
-        const isJustCaseDiff = currentParam && newParam && currentParam.toLowerCase() === newParam.toLowerCase();
-
-        if (isJustCaseDiff) {
-            window.history.replaceState({}, '', historyUrl);
-        } else {
-            window.history.pushState({}, '', historyUrl);
-        }
     }
 
     if (name === "Global") {
         if (!state) {
             document.getElementById('stats').innerText = "";
-            map.setView([initialLat, initialLng], initialZoom);
+            if (!preserveView) map.setView([initialLat, initialLng], initialZoom);
             return;
         }
         let totalMissing = 0;
@@ -405,7 +432,7 @@ function loadDistrict(name) {
             totalMissing = districtsData.reduce((sum, d) => sum + (d.missing || 0), 0);
         }
         document.getElementById('stats').innerText = `gesamt: ${totalMissing} fehlende Adressen`;
-        map.setView([initialLat, initialLng], initialZoom);
+        if (!preserveView) map.setView([initialLat, initialLng], initialZoom);
         return;
     }
 
@@ -537,7 +564,7 @@ function loadDistrict(name) {
                 }
             });
             currentLayer.addTo(map);
-            if (data.features.length > 0) {
+            if (data.features.length > 0 && !preserveView) {
                 map.fitBounds(currentLayer.getBounds());
             }
 
