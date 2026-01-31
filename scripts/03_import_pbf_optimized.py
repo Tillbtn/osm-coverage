@@ -38,6 +38,10 @@ STATES = {
     "he": {
         "pbf_url": "https://download.geofabrik.de/europe/germany/hessen-latest.osm.pbf",
         "pbf_file": "hessen-latest.osm.pbf"
+    },
+    "st": {
+        "pbf_url": "https://download.geofabrik.de/europe/germany/sachsen-anhalt-latest.osm.pbf",
+        "pbf_file": "sachsen-anhalt-latest.osm.pbf"
     }
 }
 

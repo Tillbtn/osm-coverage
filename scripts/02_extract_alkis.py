@@ -21,6 +21,7 @@ DIR_RLP = os.path.join(DATA_DIR, "rlp")
 DIR_BB = os.path.join(DATA_DIR, "bb")
 DIR_HH = os.path.join(DATA_DIR, "hh")
 DIR_HE = os.path.join(DATA_DIR, "he")
+DIR_ST = os.path.join(DATA_DIR, "st")
 
 def remove_ortsteil(text):
     """
@@ -86,7 +87,7 @@ def split_alkis_address_string(original_street, original_hnr_string, extra_separ
         else:
             results.append((current_street, part))
             
-    return resultsdefault
+    return results
 
 def expand_complex_addresses(df, extra_separators=None, desc="Splitting Addresses"):
     """
@@ -261,25 +262,27 @@ def normalize_columns(gdf):
 
 
 class DistrictHandler(osmium.SimpleHandler):
-    def __init__(self):
+    def __init__(self, admin_levels=['10']):
         super(DistrictHandler, self).__init__()
         self.boundaries = []
         self.wkbfab = osmium.geom.WKBFactory()
+        self.admin_levels = admin_levels
 
     def area(self, a):
         try:
             if 'boundary' in a.tags and a.tags['boundary'] == 'administrative':
-                if a.tags.get('admin_level') == '10':
+                if a.tags.get('admin_level') in self.admin_levels:
                     wkb_data = self.wkbfab.create_multipolygon(a)
                     name = a.tags.get('name')
+                    level = a.tags.get('admin_level')
                     if name:
-                        self.boundaries.append({'name': name, 'wkb': wkb_data})
+                        self.boundaries.append({'name': name, 'wkb': wkb_data, 'admin_level': level})
         except:
             pass
 
-def extract_osm_boundaries(pbf_path):
-    print(f"[HH] Extracting district boundaries from {pbf_path}...")
-    handler = DistrictHandler()
+def extract_osm_boundaries(pbf_path, admin_levels=['10']):
+    print(f"Extracting district boundaries from {pbf_path} (levels={admin_levels})...")
+    handler = DistrictHandler(admin_levels=admin_levels)
     am = osmium.area.AreaManager()
     
     # 2-pass approach generally required for Relations -> Areas
@@ -901,14 +904,101 @@ def process_he(directory):
             
     return results
 
+def process_st(directory):
+    # ST Data: XML files in GBIS_Gebaeude subdir
+    # Format: GML/WFS FeatureCollection
+    # Feature: GebaeudeBauwerk
+    # Address field: lagebeztxt
+    
+    search_dir = os.path.join(directory, "GBIS_Gebaeude")
+    xmls = glob.glob(os.path.join(search_dir, "*.xml"))
+    
+    if not xmls:
+        # Fallback check root dir
+        xmls = glob.glob(os.path.join(directory, "*.xml"))
+        
+    if not xmls:
+        print(f"[ST] No XML files found in {search_dir} or {directory}")
+        return []
+
+    results = []
+    
+    for xml_path in tqdm.tqdm(xmls, desc="Processing ST XMLs"):
+        try:
+            try:
+                gdf = gpd.read_file(xml_path, engine='pyogrio')
+            except Exception as e:
+                layers = gpd.list_layers(xml_path)
+                if not layers.empty:
+                    layer = layers['name'][0]
+                    gdf = gpd.read_file(xml_path, layer=layer)
+                else:
+                    raise e
+                    
+            if gdf.empty: continue
+            
+            cols = gdf.columns.str.lower()
+            if 'lagebeztxt' in cols:
+                pass
+            
+            gdf = normalize_columns(gdf)
+            
+            if gdf is not None and not gdf.empty:
+                gdf['state'] = 'Sachsen-Anhalt'
+                
+                gdf = expand_complex_addresses(gdf)
+                
+                # Spatial Join with OSM Districts
+                if 'district' in gdf.columns: del gdf['district']
+                
+                pbf_path = os.path.join(os.path.dirname(directory), "osm", "sachsen-anhalt-latest.osm.pbf")
+                if os.path.exists(pbf_path):
+                     # Load Admin Level 8 (Gemeinden) and 6 (Kreisfreie Städte fallback)
+                     districts_gdf = extract_osm_boundaries(pbf_path, admin_levels=['6', '8'])
+                     
+                     if districts_gdf is not None and not districts_gdf.empty:
+                         if gdf.crs != districts_gdf.crs:
+                             districts_gdf = districts_gdf.to_crs(gdf.crs)
+
+                         joined = gpd.sjoin(gdf, districts_gdf[['geometry', 'name', 'admin_level']], how='left', predicate='intersects')
+                         
+                         def select_district(group):
+                             l8 = group[group['admin_level'] == '8']
+                             if not l8.empty:
+                                 return l8.iloc[0]['name']
+                             
+                             l6 = group[group['admin_level'] == '6']
+                             if not l6.empty:
+                                 return l6.iloc[0]['name']
+                                 
+                             return None
+
+                         joined['index_orig'] = joined.index
+                         joined_sorted = joined.sort_values(by='admin_level', ascending=False)
+                         joined_dedup = joined_sorted[~joined_sorted.index.duplicated(keep='first')]
+                         
+                         gdf['district'] = joined_dedup['name']
+                         gdf['district'] = gdf['district'].fillna('Unbekannt')
+                         
+                     else:
+                         gdf['district'] = 'ST'
+                else:
+                    gdf['district'] = 'ST'
+                
+                if 'city' not in gdf.columns or gdf['city'].isnull().all():
+                    gdf['city'] = gdf['district']
+                
+                results.append(gdf)
+                
+        except Exception as e:
+            print(f"[ST] Error processing {xml_path}: {e}")
+            pass
+            
+    return results
+
 
 def main():
-    process_state("NDS", DIR_NDS, process_lgln)
-    process_state("NRW", DIR_NRW, process_nrw)
-    process_state("RLP", DIR_RLP, process_rlp)
-    process_state("BB", DIR_BB, process_bb)
-    process_state("HH", DIR_HH, process_hh)
-    process_state("HE", DIR_HE, process_he)
+    process_state("ST", DIR_ST, process_st)
 
 if __name__ == "__main__":
     main()
