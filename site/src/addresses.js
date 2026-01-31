@@ -22,6 +22,7 @@ let currentDistrictName = "";
 // Configuration from URL or Body
 const params = new URLSearchParams(window.location.search);
 const stateFromUrl = params.get('state');
+const districtFromUrl = params.get('district');
 const state = stateFromUrl || document.body.dataset.state;
 
 const config = STATE_CONFIG[state] || { center: [51.16, 10.45], zoom: 6, name: "Deutschland" };
@@ -338,7 +339,15 @@ Promise.all([
     }
 
     // Initial Load
-    loadDistrict("Global");
+    const foundDistrict = districtFromUrl ? districts.find(d => d.name.toLowerCase() === districtFromUrl.toLowerCase()) : null;
+
+    if (foundDistrict) {
+        const sel = document.getElementById('districtSelect');
+        if (sel) sel.value = foundDistrict.name;
+        loadDistrict(foundDistrict.name);
+    } else {
+        loadDistrict("Global");
+    }
 
 }).catch(err => {
     console.error("Init Error:", err);
@@ -372,6 +381,28 @@ function loadDistrict(name) {
 
     document.getElementById('stats').innerText = `Lade ${name}...`;
     currentDistrictName = name;
+
+    // Update URL
+    const historyUrl = new URL(window.location);
+    const currentParam = historyUrl.searchParams.get('district');
+    const newParam = name === "Global" ? null : name;
+
+    if (currentParam !== newParam) {
+        if (name === "Global") {
+            historyUrl.searchParams.delete('district');
+        } else {
+            historyUrl.searchParams.set('district', name);
+        }
+
+        // If only case matched (canonicalization), use replaceState. Otherwise pushState.
+        const isJustCaseDiff = currentParam && newParam && currentParam.toLowerCase() === newParam.toLowerCase();
+
+        if (isJustCaseDiff) {
+            window.history.replaceState({}, '', historyUrl);
+        } else {
+            window.history.pushState({}, '', historyUrl);
+        }
+    }
 
 
     // Calculate URL
