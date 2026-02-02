@@ -104,6 +104,10 @@ def apply_corrections(alkis_df, corrections_file, state):
                 alkis_df.loc[mask, 'correction_type'] = 'ignored'
                 if comment:
                     alkis_df.loc[mask, 'correction_comment'] = comment
+            elif corr.get("already_mapped"):
+                 alkis_df.loc[mask, 'correction_type'] = 'already_mapped'
+                 if comment:
+                    alkis_df.loc[mask, 'correction_comment'] = comment
             else:
                 if "to_street" in corr:
                     alkis_df.loc[mask, 'street'] = corr["to_street"]
@@ -166,6 +170,10 @@ def apply_corrections(alkis_df, corrections_file, state):
                 alkis_df.loc[mask, 'correction_type'] = 'ignored'
                 if comment:
                     alkis_df.loc[mask, 'correction_comment'] = comment
+            elif corr.get("already_mapped"):
+                 alkis_df.loc[mask, 'correction_type'] = 'already_mapped'
+                 if comment:
+                    alkis_df.loc[mask, 'correction_comment'] = comment
             else:
                 if "to_street" in corr:
                     alkis_df.loc[mask, 'street'] = corr["to_street"]
@@ -199,6 +207,10 @@ def apply_corrections(alkis_df, corrections_file, state):
                 count += rows_affected
                 if corr.get("ignore"):
                      alkis_df.loc[mask, 'correction_type'] = 'ignored'
+                     if comment:
+                         alkis_df.loc[mask, 'correction_comment'] = comment
+                elif corr.get("already_mapped"):
+                     alkis_df.loc[mask, 'correction_type'] = 'already_mapped'
                      if comment:
                          alkis_df.loc[mask, 'correction_comment'] = comment
                 else: 
@@ -474,10 +486,10 @@ def main():
         
         for district in tqdm.tqdm(districts, desc=f"[{state}] Processing Districts", ascii=True):
             district_alkis = alkis[alkis['district'] == district]
-            # Exclude ignored addresses from missing
+            # Exclude ignored and already_mapped addresses from missing
             district_missing = district_alkis[~district_alkis['found_in_osm']]
             if 'correction_type' in district_alkis.columns:
-                 district_missing = district_missing[district_missing['correction_type'] != 'ignored']
+                 district_missing = district_missing[~district_alkis['correction_type'].isin(['ignored', 'already_mapped'])]
             
             d_total = len(district_alkis)
             d_missing = len(district_missing)
@@ -491,8 +503,8 @@ def main():
             # Count corrections
             d_corrections = 0
             if 'correction_type' in district_alkis.columns:
-                 # Count corrections that result in a match or are ignored
-                 d_corrections = int(((district_alkis['correction_type'].notna() & district_alkis['found_in_osm']) | (district_alkis['correction_type'] == 'ignored')).sum())
+                 # Count corrections that result in a match or are ignored or already_mapped
+                 d_corrections = int(((district_alkis['correction_type'].notna() & district_alkis['found_in_osm']) | district_alkis['correction_type'].isin(['ignored', 'already_mapped'])).sum())
 
             d_stats = {
                 "name": unique_name,
@@ -619,8 +631,8 @@ def main():
         
         global_corrections = 0
         if 'correction_type' in alkis.columns:
-             # Count corrections that result in a match or are ignored
-             global_corrections = int(((alkis['correction_type'].notna() & alkis['found_in_osm']) | (alkis['correction_type'] == 'ignored')).sum())
+             # Count corrections that result in a match or are ignored or already_mapped
+             global_corrections = int(((alkis['correction_type'].notna() & alkis['found_in_osm']) | alkis['correction_type'].isin(['ignored', 'already_mapped'])).sum())
 
         g_entry = {
              "date": export_date,

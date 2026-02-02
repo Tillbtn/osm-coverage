@@ -71,6 +71,7 @@ class CorrectionModal {
                             <option value="single">Adresse korrigieren</option>
                             <option value="street">Straßenname korrigieren (alle Nummern)</option>
                             <option value="ignore">Adresse ignorieren</option>
+                            <option value="already_mapped">Adresse bereits eingetragen</option>
                         </select>
                         
                         <div id="corr-fields-single">
@@ -133,6 +134,7 @@ class CorrectionModal {
             if (e.target.value === 'single') this.fieldsSingle.style.display = 'block';
             if (e.target.value === 'street') this.fieldsStreet.style.display = 'block';
             if (e.target.value === 'ignore') this.fieldsIgnore.style.display = 'block';
+            if (e.target.value === 'already_mapped') this.fieldsIgnore.style.display = 'block';
         });
 
         this.submitBtn.addEventListener('click', () => this.submit());
@@ -231,6 +233,11 @@ class CorrectionModal {
                 correction.from_housenumber = this.hnr;
                 correction.city = currentDistrictName;
                 correction.ignore = true;
+            } else if (type === 'already_mapped') {
+                correction.from_street = this.street;
+                correction.from_housenumber = this.hnr;
+                correction.city = currentDistrictName;
+                correction.already_mapped = true;
             }
         }
 
@@ -540,7 +547,7 @@ function loadDistrict(name, preserveView = false) {
                             }
 
                             if (!isMatched) {
-                                content += `<button class="correction-init-btn" style="background: #3b82f6; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.375rem; cursor: pointer; font-weight: 500; width: 100%; margin-bottom: 5px;">ALKIS fehlerhaft?</button>`;
+                                content += `<button class="correction-init-btn" style="background: #3b82f6; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.375rem; cursor: pointer; font-weight: 500; width: 100%; margin-bottom: 5px;">Falschmeldung?</button>`;
                             }
 
                             // 1. Content
