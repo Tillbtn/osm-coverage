@@ -60,6 +60,9 @@ def apply_corrections(alkis_df, corrections_file, state):
     if 'original_housenumber' not in alkis_df.columns:
         alkis_df['original_housenumber'] = pd.NA
         alkis_df['original_housenumber'] = alkis_df['original_housenumber'].astype('object')
+    if 'official_report' not in alkis_df.columns:
+        alkis_df['official_report'] = False
+        alkis_df['official_report'] = alkis_df['official_report'].astype('bool')
 
     if not os.path.exists(corrections_file):
         return alkis_df
@@ -79,6 +82,9 @@ def apply_corrections(alkis_df, corrections_file, state):
         replace_in_street = corr.get("replace_in_street")
         tag = corr.get("tag", "corrected") # Allow custom tag from JSON, default to "corrected"
         comment = corr.get("comment", None)
+        official_report = corr.get("official_report", False)
+        if official_report:
+             official_report = True
         
         # Check for ID-based correction first
         if "alkis_id" in corr:
@@ -100,6 +106,9 @@ def apply_corrections(alkis_df, corrections_file, state):
                  alkis_df.loc[mask_orig_hnr_nan, 'original_housenumber'] = alkis_df.loc[mask_orig_hnr_nan, 'housenumber']
             
             # Apply changes
+            if official_report:
+                 alkis_df.loc[mask, 'official_report'] = True
+
             if corr.get("ignore"):
                 alkis_df.loc[mask, 'correction_type'] = 'ignored'
                 if comment:
@@ -166,6 +175,9 @@ def apply_corrections(alkis_df, corrections_file, state):
             count += rows_affected
             
             # Apply changes
+            if official_report:
+                 alkis_df.loc[mask, 'official_report'] = True
+
             if corr.get("ignore"):
                 alkis_df.loc[mask, 'correction_type'] = 'ignored'
                 if comment:
@@ -205,6 +217,9 @@ def apply_corrections(alkis_df, corrections_file, state):
                 
                 count += rows_affected
                 count += rows_affected
+                if official_report:
+                     alkis_df.loc[mask, 'official_report'] = True
+
                 if corr.get("ignore"):
                      alkis_df.loc[mask, 'correction_type'] = 'ignored'
                      if comment:
@@ -616,6 +631,8 @@ def main():
                  cols_to_export.append('original_housenumber')
             if 'alkis_id' in combined_export.columns:
                  cols_to_export.append('alkis_id')
+            if 'official_report' in combined_export.columns:
+                 cols_to_export.append('official_report')
                 
             final_export = combined_export[cols_to_export]
             
