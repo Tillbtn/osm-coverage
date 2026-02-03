@@ -419,19 +419,25 @@ function isValid(val) {
 }
 
 // Helper to get done list from localStorage
-function getDoneList() {
+function getDoneData() {
     try {
-        const stored = localStorage.getItem('osm_alkis_done_ids');
-        return stored ? JSON.parse(stored) : [];
+        const stored = localStorage.getItem('osm_alkis_done_by_district');
+        return stored ? JSON.parse(stored) : {};
     } catch (e) {
         console.error("Error reading from localStorage", e);
-        return [];
+        return {};
     }
 }
 
 function toggleDone(alkisId) {
-    if (!alkisId) return false;
-    const list = getDoneList();
+    if (!alkisId || !currentDistrictName) return false;
+    const data = getDoneData();
+    // Ensure district array exists
+    if (!data[currentDistrictName]) {
+        data[currentDistrictName] = [];
+    }
+
+    const list = data[currentDistrictName];
     const index = list.indexOf(alkisId);
     let isDone = false;
 
@@ -443,14 +449,15 @@ function toggleDone(alkisId) {
         isDone = true;
     }
 
-    localStorage.setItem('osm_alkis_done_ids', JSON.stringify(list));
+    localStorage.setItem('osm_alkis_done_by_district', JSON.stringify(data));
     return isDone;
 }
 
 function isDone(alkisId) {
-    if (!alkisId) return false;
-    const list = getDoneList();
-    return list.includes(alkisId);
+    if (!alkisId || !currentDistrictName) return false;
+    const data = getDoneData();
+    const list = data[currentDistrictName]; // Only check current district
+    return list ? list.includes(alkisId) : false;
 }
 
 function loadDistrict(name, preserveView = false) {
@@ -512,6 +519,36 @@ function loadDistrict(name, preserveView = false) {
     // Note: Vite will serve these from public directory
     fetchGeoJSON(url)
         .then(data => {
+            // Guard against stale requests
+            if (currentDistrictName !== name) {
+                console.log(`Ignoring stale response for ${name}`);
+                return;
+            }
+
+            // Remove 'done' IDs that are no longer in the GeoJSON
+            try {
+                const doneData = getDoneData();
+                if (doneData[name] && doneData[name].length > 0) {
+                    const validIds = new Set();
+                    data.features.forEach(f => {
+                        if (f.properties && f.properties.alkis_id) {
+                            validIds.add(f.properties.alkis_id);
+                        }
+                    });
+
+                    const originalCount = doneData[name].length;
+                    const cleanedList = doneData[name].filter(id => validIds.has(id));
+
+                    if (cleanedList.length !== originalCount) {
+                        console.log(`Cleaned up ${originalCount - cleanedList.length} stale 'done' IDs for ${name}.`);
+                        doneData[name] = cleanedList;
+                        localStorage.setItem('osm_alkis_done_by_district', JSON.stringify(doneData));
+                    }
+                }
+            } catch (cleanupErr) {
+                console.warn("Cleanup of done IDs failed", cleanupErr);
+            }
+
             currentLayer = L.geoJSON(data, {
                 pointToLayer: function (feature, latlng) {
                     let fillColor = "#ff4444"; // Red (Missing)
