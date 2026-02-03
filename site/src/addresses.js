@@ -418,6 +418,48 @@ function isValid(val) {
     return val !== null && val !== undefined && val !== "<NA>" && val !== "nan" && val !== "";
 }
 
+// Helper to get done list from localStorage
+function getDoneData() {
+    try {
+        const stored = localStorage.getItem('osm_alkis_done_by_district');
+        return stored ? JSON.parse(stored) : {};
+    } catch (e) {
+        console.error("Error reading from localStorage", e);
+        return {};
+    }
+}
+
+function toggleDone(alkisId) {
+    if (!alkisId || !currentDistrictName) return false;
+    const data = getDoneData();
+    // Ensure district array exists
+    if (!data[currentDistrictName]) {
+        data[currentDistrictName] = [];
+    }
+
+    const list = data[currentDistrictName];
+    const index = list.indexOf(alkisId);
+    let isDone = false;
+
+    if (index > -1) {
+        list.splice(index, 1);
+        isDone = false;
+    } else {
+        list.push(alkisId);
+        isDone = true;
+    }
+
+    localStorage.setItem('osm_alkis_done_by_district', JSON.stringify(data));
+    return isDone;
+}
+
+function isDone(alkisId) {
+    if (!alkisId || !currentDistrictName) return false;
+    const data = getDoneData();
+    const list = data[currentDistrictName]; // Only check current district
+    return list ? list.includes(alkisId) : false;
+}
+
 function loadDistrict(name, preserveView = false) {
     if (currentLayer) map.removeLayer(currentLayer);
     currentLayer = null;
@@ -477,6 +519,36 @@ function loadDistrict(name, preserveView = false) {
     // Note: Vite will serve these from public directory
     fetchGeoJSON(url)
         .then(data => {
+            // Guard against stale requests
+            if (currentDistrictName !== name) {
+                console.log(`Ignoring stale response for ${name}`);
+                return;
+            }
+
+            // Remove 'done' IDs that are no longer in the GeoJSON
+            try {
+                const doneData = getDoneData();
+                if (doneData[name] && doneData[name].length > 0) {
+                    const validIds = new Set();
+                    data.features.forEach(f => {
+                        if (f.properties && f.properties.alkis_id) {
+                            validIds.add(f.properties.alkis_id);
+                        }
+                    });
+
+                    const originalCount = doneData[name].length;
+                    const cleanedList = doneData[name].filter(id => validIds.has(id));
+
+                    if (cleanedList.length !== originalCount) {
+                        console.log(`Cleaned up ${originalCount - cleanedList.length} stale 'done' IDs for ${name}.`);
+                        doneData[name] = cleanedList;
+                        localStorage.setItem('osm_alkis_done_by_district', JSON.stringify(doneData));
+                    }
+                }
+            } catch (cleanupErr) {
+                console.warn("Cleanup of done IDs failed", cleanupErr);
+            }
+
             currentLayer = L.geoJSON(data, {
                 pointToLayer: function (feature, latlng) {
                     let fillColor = "#ff4444"; // Red (Missing)
@@ -485,6 +557,7 @@ function loadDistrict(name, preserveView = false) {
                     // If correction_type is valid:
                     // - If matched: Blue (#3b82f6)
                     // - If NOT matched: Purple (#8b5cf6)
+                    // - If ignored: Gray (#9ca3af)
                     // If matched but no correction_type: Green (#10b981)
 
                     if (props && isValid(props.correction_type)) {
@@ -497,6 +570,11 @@ function loadDistrict(name, preserveView = false) {
                         }
                     } else if (props && props.matched) {
                         fillColor = "#10b981"; // Green (Found without explicit correction)
+                    }
+
+                    // Check local done state
+                    if (props && props.alkis_id && isDone(props.alkis_id)) {
+                        fillColor = "#22c55e"; // Green-500 for locally done
                     }
 
                     return L.circleMarker(latlng, {
@@ -518,6 +596,7 @@ function loadDistrict(name, preserveView = false) {
                             const comment = isValid(feature.properties.correction_comment) ? feature.properties.correction_comment : '';
                             const origStreet = feature.properties.original_street || street;
                             const origHnr = feature.properties.original_housenumber || hnr;
+                            const alkisId = feature.properties.alkis_id;
 
                             const lat = layer.getLatLng().lat;
                             const lng = layer.getLatLng().lng;
@@ -564,40 +643,108 @@ function loadDistrict(name, preserveView = false) {
                                 content += `<div style="font-weight: 500; color: #3b82f6; margin-bottom: 5px; font-size: 0.9em;">Offizielle Meldung</div>`;
                             }
 
+                            // Correction Button
                             if (!isMatched) {
                                 content += `<button class="correction-init-btn" style="background: #3b82f6; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.375rem; cursor: pointer; font-weight: 500; width: 100%; margin-bottom: 5px;">Falschmeldung?</button>`;
                             }
+
+
 
                             // 1. Content
                             const contentDiv = document.createElement('div');
                             contentDiv.innerHTML = content;
                             container.appendChild(contentDiv);
 
+                            // Footer Container (Links + Done Button)
+                            const footerContainer = document.createElement('div');
+                            footerContainer.style.display = 'flex';
+                            footerContainer.style.justifyContent = 'space-between';
+                            footerContainer.style.alignItems = 'flex-end';
+                            footerContainer.style.marginTop = '10px';
+
+                            // Links Wrapper
+                            const linksWrapper = document.createElement('div');
+                            linksWrapper.style.display = 'flex';
+                            linksWrapper.style.flexDirection = 'column';
+                            linksWrapper.style.gap = '5px';
+
                             // 2. osm.org Link 
                             const currentZoom = map.getZoom();
                             const osmLinkContainer = createOSMLink(lat, lng, currentZoom);
                             osmLinkContainer.style.display = 'flex';
                             osmLinkContainer.style.gap = '10px';
-                            container.appendChild(osmLinkContainer);
+                            linksWrapper.appendChild(osmLinkContainer);
 
                             // 3. JOSM Link
-                            const linkContainer = document.createElement('div');
-                            linkContainer.style.display = 'flex';
-                            linkContainer.style.gap = '10px';
-                            linkContainer.style.marginTop = '5px';
+                            const josmLinkContainer = createJOSMLink(lat, lng);
+                            const josmWrapper = document.createElement('div');
+                            josmWrapper.style.display = 'flex';
+                            josmWrapper.style.gap = '10px';
+                            josmWrapper.appendChild(josmLinkContainer);
+                            linksWrapper.appendChild(josmWrapper);
 
-                            linkContainer.appendChild(createJOSMLink(lat, lng));
-                            container.appendChild(linkContainer);
+                            footerContainer.appendChild(linksWrapper);
+
+                            // Done Button
+                            if (alkisId) {
+                                const isCurrentlyDone = isDone(alkisId);
+                                const doneBtn = document.createElement('button');
+                                doneBtn.className = 'done-btn';
+                                doneBtn.innerHTML = '✔';
+                                doneBtn.style.background = 'transparent';
+                                doneBtn.style.border = 'none';
+                                doneBtn.style.cursor = 'pointer';
+                                doneBtn.style.fontSize = '1.5rem';
+                                doneBtn.style.lineHeight = '1';
+                                doneBtn.style.padding = '0 5px';
+                                doneBtn.style.marginBottom = '3px';
+                                doneBtn.style.color = isCurrentlyDone ? '#22c55e' : '#cbd5e1';
+                                doneBtn.title = isCurrentlyDone ? "Als nicht erledigt markieren" : "Lokal als erledigt markieren";
+
+                                doneBtn.addEventListener('click', (e) => {
+                                    e.stopPropagation();
+                                    const newDoneState = toggleDone(alkisId);
+
+                                    // Update Button UI
+                                    doneBtn.style.color = newDoneState ? '#22c55e' : '#cbd5e1';
+                                    doneBtn.title = newDoneState ? "Als nicht erledigt markieren" : "Lokal als erledigt markieren";
+
+                                    // Update Layer Style
+                                    if (newDoneState) {
+                                        layer.setStyle({ fillColor: "#22c55e" });
+                                    } else {
+                                        let fillColor = "#ff4444";
+                                        const props = feature.properties;
+                                        if (props && isValid(props.correction_type)) {
+                                            if (props.correction_type === 'ignored') fillColor = "#9ca3af";
+                                            else if (props.matched) fillColor = "#3b82f6";
+                                            else fillColor = "#8b5cf6";
+                                        } else if (props && props.matched) {
+                                            fillColor = "#10b981";
+                                        }
+                                        layer.setStyle({ fillColor: fillColor });
+                                    }
+                                });
+
+                                footerContainer.appendChild(doneBtn);
+                            }
+
+                            container.appendChild(footerContainer);
+
+
 
                             // Bind event for modal only if button exists
-                            const btn = container.querySelector('.correction-init-btn');
-                            if (btn) {
-                                btn.addEventListener('click', (e) => {
+                            const corrBtn = container.querySelector('.correction-init-btn');
+                            if (corrBtn) {
+                                corrBtn.addEventListener('click', (e) => {
                                     e.stopPropagation(); // prevent map events
                                     correctionModal.open(street, hnr, feature.properties.alkis_id);
                                     map.closePopup();
                                 });
                             }
+
+
+
                             return container;
                         }, { maxWidth: 300 });
                     }
