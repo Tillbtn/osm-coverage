@@ -798,6 +798,7 @@ legend.onAdd = function (map) {
         <div><span style="display:inline-block;width:10px;height:10px;background:#3b82f6;border-radius:50%;margin-right:5px;"></span> ALKIS korrigiert, deshalb in OSM gefunden</div>
         <div><span style="display:inline-block;width:10px;height:10px;background:#8b5cf6;border-radius:50%;margin-right:5px;"></span> ALKIS korrigiert, nicht in OSM gefunden</div>
         <div><span style="display:inline-block;width:10px;height:10px;background:#9ca3af;border-radius:50%;margin-right:5px;"></span> ALKIS ignoriert</div>
+        <div><span style="display:inline-block;width:10px;height:10px;background:#22c55e;border-radius:50%;margin-right:5px;"></span> Lokal als erledigt markiert</div>
     `;
 
     // Toggle Logic

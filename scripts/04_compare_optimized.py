@@ -495,6 +495,7 @@ def main():
         except Exception as e:
             print(f"[{state}] Warning: Could not read PBF timestamp: {e}")
 
+        # print(f"Export date: {export_date}")
         districts = alkis['district'].unique()
         
         district_list = []

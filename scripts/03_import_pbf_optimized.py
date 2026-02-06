@@ -137,8 +137,14 @@ class AddressHandler(osmium.SimpleHandler):
 
 def download_pbf(url, local_path):
     print(f"Checking {url}...")
+
+    # headers={
+    #     "Cache-Control": "no-cache",
+    #     "Pragma": "no-cache"
+    # }
     try:
         head_response = requests.head(url)
+        # head_response = requests.head(url, allow_redirects=True, headers=headers, timeout=30)
         head_response.raise_for_status()
         last_modified = head_response.headers.get("Last-Modified")
 
@@ -157,6 +163,7 @@ def download_pbf(url, local_path):
 
     print(f"Downloading {url} to {local_path}...")
     with requests.get(url, stream=True) as r:
+    # with requests.get(url, stream=True, headers=headers, timeout=30) as r:
         r.raise_for_status()
         total_size = int(r.headers.get('content-length', 0))
         block_size = 8192
