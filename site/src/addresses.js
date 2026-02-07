@@ -12,9 +12,11 @@ let sortAsc = true;
 let historyDataStore = null;
 
 const STATE_CONFIG = {
-    nds: { center: [52.9, 9.8], zoom: 8, name: "Niedersachsen" },
-    nrw: { center: [51.4, 7.6], zoom: 8, name: "Nordrhein-Westfalen" },
-    rlp: { center: [49.9, 7.3], zoom: 8, name: "Rheinland-Pfalz" }
+    hh: { center: [53.55, 10.0], zoom: 11, name: "Hamburg" },
+    nds: { center: [52.9, 9.8], zoom: 9, name: "Niedersachsen" },
+    nrw: { center: [51.4, 7.6], zoom: 9, name: "Nordrhein-Westfalen" },
+    rlp: { center: [49.9, 7.3], zoom: 9, name: "Rheinland-Pfalz" },
+    bb: { center: [52.36, 13.0], zoom: 9, name: "Brandenburg" },
 };
 
 let currentDistrictName = "";

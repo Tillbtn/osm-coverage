@@ -41,8 +41,6 @@ STATES = {
     "hh": { "pbf_file": "hamburg-latest.osm.pbf" },
     "he": { "pbf_file": "hessen-latest.osm.pbf" },
     "st": { "pbf_file": "sachsen-anhalt-latest.osm.pbf" }
-    "he": { "pbf_file": "hessen-latest.osm.pbf" },
-    "st": { "pbf_file": "sachsen-anhalt-latest.osm.pbf" }
 }
 
 
@@ -487,6 +485,19 @@ def main():
         corrections_file = os.path.join(SITE_DIR, state, f"{state}_alkis_corrections.json")
         alkis = apply_corrections(alkis, corrections_file, state)
 
+        # Apply KGV Filter (Brandenburg specific)
+        FILTER_KGV = True 
+        if FILTER_KGV and state == 'bb':
+            # Filter addresses containing "Kleingarten" or starting with "KGV"
+            mask_kgv = alkis['street'].str.contains(r'Kleingarten|KGV', case=False, regex=True, na=False)
+            
+            if mask_kgv.any():
+                print(f"[{state}] Marking {mask_kgv.sum()} KGV/Kleingarten addresses as ignored.")                
+                mask_apply = mask_kgv & alkis['correction_type'].isna()
+                if mask_apply.any():
+                    alkis.loc[mask_apply, 'correction_type'] = 'ignored'
+                    alkis.loc[mask_apply, 'correction_comment'] = 'Automatisch ignoriert: Kleingarten'
+
         # Expand Aachen Addresses
         if state == "nrw":
              alkis = expand_aachen_addresses(alkis)
@@ -533,7 +544,7 @@ def main():
 
         # Align CRS
         if alkis.crs is not None and osm.crs is not None and not alkis.crs.equals(osm.crs):
-             print(f"[{state}] Reprojecting OSM from {osm.crs} to {alkis.crs}")
+            #  print(f"[{state}] Reprojecting OSM from {osm.crs} to {alkis.crs}")
              osm = osm.to_crs(alkis.crs)
 
         # Matching Logic

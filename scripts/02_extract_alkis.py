@@ -341,8 +341,8 @@ def process_state(state_name, state_dir, process_func):
     else:
         print(f"[{state_name}] No addresses found.")
 
-def process_lgln(directory):
-    # LGLN: Zips containing GPKGs
+def process_nds(directory):
+    # nds: Zips containing GPKGs
     results = []
     zips = glob.glob(os.path.join(directory, "*.zip"))
     for z in tqdm.tqdm(zips, desc="Extracting NDS Zips"):
@@ -553,12 +553,42 @@ def process_bb(directory):
     print(f"[BB] Reading GPKG from {gpkg_path}...")
     
     try:
-        gdf = gpd.read_file(gpkg_path, layer='adressen-bb', engine='pyogrio')
-        
+        try:
+            gdf = gpd.read_file(
+                gpkg_path, 
+                layer='adressen-bb', 
+                engine='pyogrio',
+                columns=['str', 'hnr', 'adz', 'postplz', 'gmd']
+            )
+        except Exception as e_cols:
+             print(f"[BB] Warning: Reading specific columns failed ({e_cols}), trying full read...")
+             gdf = gpd.read_file(gpkg_path, layer='adressen-bb', engine='pyogrio')
+
         gdf = gdf.dropna(subset=['str', 'hnr'])
         
         # Combine HNR + ADZ
-        gdf['housenumber'] = gdf['hnr'].astype(str) + gdf['adz'].fillna('').astype(str)
+        # Logic copied from brandenburg-addresses:
+        # 1. If adz starts with digit -> hnr + "/" + adz
+        # 2. If adz contains [pP][0-9]+ -> prepend "/" to the match (regex replace)
+        # 3. Else -> hnr + adz
+        
+        def format_bb_housenumber(row):
+            hnr = str(row['hnr'])
+            adz = str(row['adz']) if pd.notna(row['adz']) and row['adz'] != '' else ""
+            
+            if not adz:
+                return hnr
+                
+            # Check if starts with digit
+            if adz[0].isdigit():
+                return f"{hnr}/{adz}"
+                
+            # Check for P+Digit pattern (e.g. P1 -> /P1)            
+            adz_mod = re.sub(r'([pP][0-9]+)', r'/\1', adz)
+            
+            return f"{hnr}{adz_mod}"
+
+        gdf['housenumber'] = gdf.apply(format_bb_housenumber, axis=1)
         
         gdf = gdf.rename(columns={
             'str': 'street',
@@ -568,11 +598,14 @@ def process_bb(directory):
         
         gdf['city'] = gdf['district']
         
-        # Ensure geometry validity
-        gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty & gdf.geometry.is_valid]
+        # Check if geometry is present before using it
+        if 'geometry' in gdf.columns:
+            gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty & gdf.geometry.is_valid]
         
         cols = ['street', 'housenumber', 'postcode', 'city', 'district', 'geometry']
-        gdf = gdf[cols].copy()
+        # Filter if columns exist
+        final_cols = [c for c in cols if c in gdf.columns]
+        gdf = gdf[final_cols].copy()
         
         gdf['state'] = 'Brandenburg'
         
@@ -998,6 +1031,12 @@ def process_st(directory):
 
 
 def main():
+    process_state("NDS", DIR_NDS, process_nds)
+    process_state("NRW", DIR_NRW, process_nrw)
+    process_state("RLP", DIR_RLP, process_rlp)
+    process_state("BB", DIR_BB, process_bb)
+    process_state("HH", DIR_HH, process_hh)
+    process_state("HE", DIR_HE, process_he)
     process_state("ST", DIR_ST, process_st)
 
 if __name__ == "__main__":
