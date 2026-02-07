@@ -41,6 +41,8 @@ STATES = {
     "hh": { "pbf_file": "hamburg-latest.osm.pbf" },
     "he": { "pbf_file": "hessen-latest.osm.pbf" },
     "st": { "pbf_file": "sachsen-anhalt-latest.osm.pbf" }
+    "he": { "pbf_file": "hessen-latest.osm.pbf" },
+    "st": { "pbf_file": "sachsen-anhalt-latest.osm.pbf" }
 }
 
 
@@ -61,6 +63,9 @@ def apply_corrections(alkis_df, corrections_file, state):
     if 'original_housenumber' not in alkis_df.columns:
         alkis_df['original_housenumber'] = pd.NA
         alkis_df['original_housenumber'] = alkis_df['original_housenumber'].astype('object')
+    if 'official_report' not in alkis_df.columns:
+        alkis_df['official_report'] = False
+        alkis_df['official_report'] = alkis_df['official_report'].astype('bool')
 
     if not os.path.exists(corrections_file):
         return alkis_df
@@ -80,6 +85,9 @@ def apply_corrections(alkis_df, corrections_file, state):
         replace_in_street = corr.get("replace_in_street")
         tag = corr.get("tag", "corrected") # Allow custom tag from JSON, default to "corrected"
         comment = corr.get("comment", None)
+        official_report = corr.get("official_report", False)
+        if official_report:
+             official_report = True
         
         # Check for ID-based correction first
         if "alkis_id" in corr:
@@ -101,9 +109,16 @@ def apply_corrections(alkis_df, corrections_file, state):
                  alkis_df.loc[mask_orig_hnr_nan, 'original_housenumber'] = alkis_df.loc[mask_orig_hnr_nan, 'housenumber']
             
             # Apply changes
+            if official_report:
+                 alkis_df.loc[mask, 'official_report'] = True
+
             if corr.get("ignore"):
                 alkis_df.loc[mask, 'correction_type'] = 'ignored'
                 if comment:
+                    alkis_df.loc[mask, 'correction_comment'] = comment
+            elif corr.get("already_mapped"):
+                 alkis_df.loc[mask, 'correction_type'] = 'already_mapped'
+                 if comment:
                     alkis_df.loc[mask, 'correction_comment'] = comment
             else:
                 if "to_street" in corr:
@@ -163,9 +178,16 @@ def apply_corrections(alkis_df, corrections_file, state):
             count += rows_affected
             
             # Apply changes
+            if official_report:
+                 alkis_df.loc[mask, 'official_report'] = True
+
             if corr.get("ignore"):
                 alkis_df.loc[mask, 'correction_type'] = 'ignored'
                 if comment:
+                    alkis_df.loc[mask, 'correction_comment'] = comment
+            elif corr.get("already_mapped"):
+                 alkis_df.loc[mask, 'correction_type'] = 'already_mapped'
+                 if comment:
                     alkis_df.loc[mask, 'correction_comment'] = comment
             else:
                 if "to_street" in corr:
@@ -198,8 +220,15 @@ def apply_corrections(alkis_df, corrections_file, state):
                 
                 count += rows_affected
                 count += rows_affected
+                if official_report:
+                     alkis_df.loc[mask, 'official_report'] = True
+
                 if corr.get("ignore"):
                      alkis_df.loc[mask, 'correction_type'] = 'ignored'
+                     if comment:
+                         alkis_df.loc[mask, 'correction_comment'] = comment
+                elif corr.get("already_mapped"):
+                     alkis_df.loc[mask, 'correction_type'] = 'already_mapped'
                      if comment:
                          alkis_df.loc[mask, 'correction_comment'] = comment
                 else: 
@@ -210,6 +239,116 @@ def apply_corrections(alkis_df, corrections_file, state):
 
     print(f"[{state}] Applied corrections to {count} rows.")
     return alkis_df
+
+def split_complex_house_numbers(df):
+    """
+    Splits house numbers with separators (comma, semicolon) into individual rows.
+    """
+    if df.empty or 'housenumber' not in df.columns:
+        return df
+        
+    # Regex to find separators: , ;
+    mask_complex = df['housenumber'].astype(str).str.contains(r'[,;]', regex=True)
+    
+    if not mask_complex.any():
+        return df
+
+    print(f"  Found {mask_complex.sum()} rows with complex house numbers (comma/semicolon) to split.")
+
+    rows_to_split = df[mask_complex]
+    clean_rows = df[~mask_complex]
+    
+    new_data = []
+    
+    for idx, row in rows_to_split.iterrows():
+        hnr = str(row['housenumber'])
+        # Replace separators with comma
+        hnr_clean = re.sub(r'[;]', ',', hnr)
+        parts = [p.strip() for p in hnr_clean.split(',') if p.strip()]
+        
+        for part in parts:
+            new_row = row.copy()
+            new_row['housenumber'] = part
+            new_data.append(new_row)
+            
+    if new_data:
+        df_split = pd.DataFrame(new_data)
+        if isinstance(df, gpd.GeoDataFrame):
+             df_split = gpd.GeoDataFrame(df_split, geometry='geometry', crs=df.crs)
+        return pd.concat([clean_rows, df_split], ignore_index=True)
+        
+    return df
+
+def expand_alphanumeric_ranges(df):
+    """
+    Expands rows with alphanumeric ranges like "11a-c" or "11a-11c".
+    """
+    if df.empty or 'housenumber' not in df.columns:
+        return df
+
+    # Case 1: "11a-c" -> prefix "11", start "a", end "c"
+    pattern_short = re.compile(r'^(\d+)([a-zA-Z])\s*-\s*([a-zA-Z])$')
+    # Case 2: "11a-11c" -> prefix "11", start "a", end "c"
+    pattern_long = re.compile(r'^(\d+)([a-zA-Z])\s*-\s*(\d+)([a-zA-Z])$')
+
+    mask_short = df['housenumber'].astype(str).str.contains(pattern_short, regex=True)
+    mask_long = df['housenumber'].astype(str).str.contains(pattern_long, regex=True)
+    
+    mask = mask_short | mask_long
+    
+    if not mask.any():
+        return df
+        
+    print(f"  Found {mask.sum()} rows with alphanumeric ranges to expand.")
+    
+    rows_to_expand = df[mask]
+    clean_rows = df[~mask]
+    
+    new_data = []
+    
+    for idx, row in rows_to_expand.iterrows():
+        hnr = str(row['housenumber']).strip()
+        
+        # Try short pattern
+        match = pattern_short.match(hnr)
+        if match:
+            num = match.group(1)
+            start_char = match.group(2)
+            end_char = match.group(3)
+            
+            if ord(start_char) < ord(end_char):
+                for i in range(ord(start_char), ord(end_char) + 1):
+                    new_row = row.copy()
+                    new_row['housenumber'] = f"{num}{chr(i)}"
+                    new_data.append(new_row)
+                continue
+
+        # Try long pattern
+        match = pattern_long.match(hnr)
+        if match:
+            num1 = match.group(1)
+            start_char = match.group(2)
+            num2 = match.group(3)
+            end_char = match.group(4)
+            
+            if num1 == num2 and ord(start_char) < ord(end_char):
+                 for i in range(ord(start_char), ord(end_char) + 1):
+                     new_row = row.copy()
+                     new_row['housenumber'] = f"{num1}{chr(i)}"
+                     new_data.append(new_row)
+                 continue
+        
+        # Fallback if regex matched but logic failed
+        new_data.append(row)
+
+    if new_data:
+        df_expanded = pd.DataFrame(new_data)
+        if isinstance(df, gpd.GeoDataFrame):
+             df_expanded = gpd.GeoDataFrame(df_expanded, geometry='geometry', crs=df.crs)
+        return pd.concat([clean_rows, df_expanded], ignore_index=True)
+
+    return df
+
 
 def expand_aachen_addresses(df):
     if df.empty or 'city' not in df.columns or 'housenumber' not in df.columns:
@@ -309,8 +448,9 @@ def expand_address_ranges(df):
     return df
 
 def main():
-    # STATES_LIST = ["nds", "nrw", "rlp", "bb", "hh", "st", "he", "mv"]
-    STATES_LIST = ["nds", "nrw", "rlp", "bb", "hh", "st"]
+    STATES_LIST = ["nds", "nrw", "rlp", "bb", "hh", "he", "st"]
+    
+    ENABLE_FLEXIBLE_PARSING = True
     
     DATA_DIR = "data"
     SITE_DIR = "site/public/states"
@@ -351,6 +491,11 @@ def main():
         if state == "nrw":
              alkis = expand_aachen_addresses(alkis)
              osm = expand_aachen_addresses(osm)
+
+        if ENABLE_FLEXIBLE_PARSING:
+             print(f"[{state}] Applying flexible OSM parsing...")
+             osm = split_complex_house_numbers(osm)
+             osm = expand_alphanumeric_ranges(osm)
 
         # Expand Address Ranges (e.g. 7-13 -> 7, 9, 11, 13)
         print(f"[{state}] Expanding address ranges...")
@@ -469,16 +614,17 @@ def main():
         except Exception as e:
             print(f"[{state}] Warning: Could not read PBF timestamp: {e}")
 
+        # print(f"Export date: {export_date}")
         districts = alkis['district'].unique()
         
         district_list = []
         
         for district in tqdm.tqdm(districts, desc=f"[{state}] Processing Districts", ascii=True):
             district_alkis = alkis[alkis['district'] == district]
-            # Exclude ignored addresses from missing
+            # Exclude ignored and already_mapped addresses from missing
             district_missing = district_alkis[~district_alkis['found_in_osm']]
             if 'correction_type' in district_alkis.columns:
-                 district_missing = district_missing[district_missing['correction_type'] != 'ignored']
+                 district_missing = district_missing[~district_alkis['correction_type'].isin(['ignored', 'already_mapped'])]
             
             d_total = len(district_alkis)
             d_missing = len(district_missing)
@@ -492,8 +638,8 @@ def main():
             # Count corrections
             d_corrections = 0
             if 'correction_type' in district_alkis.columns:
-                 # Count corrections that result in a match or are ignored
-                 d_corrections = int(((district_alkis['correction_type'].notna() & district_alkis['found_in_osm']) | (district_alkis['correction_type'] == 'ignored')).sum())
+                 # Count corrections that result in a match or are ignored or already_mapped
+                 d_corrections = int(((district_alkis['correction_type'].notna() & district_alkis['found_in_osm']) | district_alkis['correction_type'].isin(['ignored', 'already_mapped'])).sum())
 
             d_stats = {
                 "name": unique_name,
@@ -605,6 +751,8 @@ def main():
                  cols_to_export.append('original_housenumber')
             if 'alkis_id' in combined_export.columns:
                  cols_to_export.append('alkis_id')
+            if 'official_report' in combined_export.columns:
+                 cols_to_export.append('official_report')
                 
             final_export = combined_export[cols_to_export]
             
@@ -620,8 +768,8 @@ def main():
         
         global_corrections = 0
         if 'correction_type' in alkis.columns:
-             # Count corrections that result in a match or are ignored
-             global_corrections = int(((alkis['correction_type'].notna() & alkis['found_in_osm']) | (alkis['correction_type'] == 'ignored')).sum())
+             # Count corrections that result in a match or are ignored or already_mapped
+             global_corrections = int(((alkis['correction_type'].notna() & alkis['found_in_osm']) | alkis['correction_type'].isin(['ignored', 'already_mapped'])).sum())
 
         g_entry = {
              "date": export_date,

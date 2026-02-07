@@ -295,3 +295,13 @@ tr:hover td {
 ::-webkit-scrollbar-thumb:hover {
     background: #a8a8a8;
 }
+
+/* Popup Links */
+.popup-link {
+    text-decoration: none;
+    color: var(--primary);
+}
+
+.popup-link:hover {
+    text-decoration: underline;
+}
