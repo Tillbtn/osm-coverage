@@ -291,9 +291,9 @@ def expand_alphanumeric_ranges(df):
     # Case 3: "11-11c" -> prefix "11", start (implicit), end "c"
     pattern_mixed = re.compile(r'^(\d+)\s*-\s*(\d+)([a-zA-Z])$')
 
-    mask_short = df['housenumber'].astype(str).str.contains(pattern_short, regex=True)
-    mask_long = df['housenumber'].astype(str).str.contains(pattern_long, regex=True)
-    mask_mixed = df['housenumber'].astype(str).str.contains(pattern_mixed, regex=True)
+    mask_short = df['housenumber'].astype(str).str.match(pattern_short)
+    mask_long = df['housenumber'].astype(str).str.match(pattern_long)
+    mask_mixed = df['housenumber'].astype(str).str.match(pattern_mixed)
     
     mask = mask_short | mask_long | mask_mixed
     
@@ -650,7 +650,7 @@ def main():
             # Exclude ignored and already_mapped addresses from missing
             district_missing = district_alkis[~district_alkis['found_in_osm']]
             if 'correction_type' in district_alkis.columns:
-                 district_missing = district_missing[~district_alkis['correction_type'].isin(['ignored', 'already_mapped'])]
+                 district_missing = district_missing[~district_missing['correction_type'].isin(['ignored', 'already_mapped'])]
             
             d_total = len(district_alkis)
             d_missing = len(district_missing)
