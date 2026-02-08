@@ -288,11 +288,14 @@ def expand_alphanumeric_ranges(df):
     pattern_short = re.compile(r'^(\d+)([a-zA-Z])\s*-\s*([a-zA-Z])$')
     # Case 2: "11a-11c" -> prefix "11", start "a", end "c"
     pattern_long = re.compile(r'^(\d+)([a-zA-Z])\s*-\s*(\d+)([a-zA-Z])$')
+    # Case 3: "11-11c" -> prefix "11", start (implicit), end "c"
+    pattern_mixed = re.compile(r'^(\d+)\s*-\s*(\d+)([a-zA-Z])$')
 
-    mask_short = df['housenumber'].astype(str).str.contains(pattern_short, regex=True)
-    mask_long = df['housenumber'].astype(str).str.contains(pattern_long, regex=True)
+    mask_short = df['housenumber'].astype(str).str.match(pattern_short)
+    mask_long = df['housenumber'].astype(str).str.match(pattern_long)
+    mask_mixed = df['housenumber'].astype(str).str.match(pattern_mixed)
     
-    mask = mask_short | mask_long
+    mask = mask_short | mask_long | mask_mixed
     
     if not mask.any():
         return df
@@ -307,6 +310,8 @@ def expand_alphanumeric_ranges(df):
     for idx, row in rows_to_expand.iterrows():
         hnr = str(row['housenumber']).strip()
         
+        processed = False
+
         # Try short pattern
         match = pattern_short.match(hnr)
         if match:
@@ -319,25 +324,48 @@ def expand_alphanumeric_ranges(df):
                     new_row = row.copy()
                     new_row['housenumber'] = f"{num}{chr(i)}"
                     new_data.append(new_row)
-                continue
+                processed = True
 
-        # Try long pattern
-        match = pattern_long.match(hnr)
-        if match:
-            num1 = match.group(1)
-            start_char = match.group(2)
-            num2 = match.group(3)
-            end_char = match.group(4)
-            
-            if num1 == num2 and ord(start_char) < ord(end_char):
-                 for i in range(ord(start_char), ord(end_char) + 1):
+        if not processed:
+            # Try long pattern
+            match = pattern_long.match(hnr)
+            if match:
+                num1 = match.group(1)
+                start_char = match.group(2)
+                num2 = match.group(3)
+                end_char = match.group(4)
+                
+                if num1 == num2 and ord(start_char) < ord(end_char):
+                     for i in range(ord(start_char), ord(end_char) + 1):
+                         new_row = row.copy()
+                         new_row['housenumber'] = f"{num1}{chr(i)}"
+                         new_data.append(new_row)
+                     processed = True
+
+        if not processed:
+            # Try mixed pattern
+            match = pattern_mixed.match(hnr)
+            if match:
+                num1 = match.group(1)
+                num2 = match.group(2)
+                end_char = match.group(3)
+                
+                if num1 == num2:
+                     # Add base number (e.g. 11)
                      new_row = row.copy()
-                     new_row['housenumber'] = f"{num1}{chr(i)}"
+                     new_row['housenumber'] = num1
                      new_data.append(new_row)
-                 continue
+                     
+                     # Add suffixes (a to end_char)
+                     for i in range(ord('a'), ord(end_char) + 1):
+                         new_row = row.copy()
+                         new_row['housenumber'] = f"{num1}{chr(i)}"
+                         new_data.append(new_row)
+                     processed = True
         
         # Fallback if regex matched but logic failed
-        new_data.append(row)
+        if not processed:
+            new_data.append(row)
 
     if new_data:
         df_expanded = pd.DataFrame(new_data)
@@ -635,7 +663,7 @@ def main():
             # Exclude ignored and already_mapped addresses from missing
             district_missing = district_alkis[~district_alkis['found_in_osm']]
             if 'correction_type' in district_alkis.columns:
-                 district_missing = district_missing[~district_alkis['correction_type'].isin(['ignored', 'already_mapped'])]
+                 district_missing = district_missing[~district_missing['correction_type'].isin(['ignored', 'already_mapped'])]
             
             d_total = len(district_alkis)
             d_missing = len(district_missing)
