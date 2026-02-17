@@ -11,6 +11,9 @@ site/buildings/
 site/node_modules/
 site/dist/
 
+testing/
+tests/
+
 *.json
 *.geojson
 
