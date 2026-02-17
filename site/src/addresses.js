@@ -45,6 +45,26 @@ const historyUrl = state ? `/states/${state}/${state}_history.json` : '/detailed
 // Init Map
 const map = createMap('map');
 
+
+// Initialize Hamburger Menu
+const menuToggle = document.getElementById('menu-toggle');
+const headerControls = document.querySelector('.header-controls');
+if (menuToggle && headerControls) {
+    menuToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        headerControls.classList.toggle('open');
+        menuToggle.setAttribute('aria-expanded', headerControls.classList.contains('open'));
+    });
+
+    // Close menu when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!headerControls.contains(e.target) && !menuToggle.contains(e.target)) {
+            headerControls.classList.remove('open');
+            menuToggle.setAttribute('aria-expanded', 'false');
+        }
+    });
+}
+
 // Map View
 const initialLat = parseFloat(document.body.dataset.centerLat) || config.center[0];
 const initialLng = parseFloat(document.body.dataset.centerLng) || config.center[1];

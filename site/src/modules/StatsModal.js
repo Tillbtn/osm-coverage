@@ -42,8 +42,8 @@ export class StatsModal {
                         <canvas id="historyChart"></canvas>
                     </div>
 
-                    <div style="max-height: 200px; overflow-y: auto; margin-top: 10px;">
-                        <table id="historyTable" style="width: 100%; font-size: 0.9em;">
+                    <div style="max-height: 200px; overflow-y: auto; overflow-x: auto; margin-top: 10px;">
+                        <table id="historyTable" style="width: 100%; font-size: 0.9em; min-width: 300px;">
                             <thead>
                                 <tr>
                                     <th>Datum</th>
@@ -68,15 +68,15 @@ export class StatsModal {
                             <!-- <option value="lines">Linien</option> -->
                         </select>
                     </div>
-                    <div class="chart-container" style="height: 400px;">
+                    <div class="chart-container" style="position: relative; height: 300px; width: 100%;">
                         <canvas id="comparisonChart"></canvas>
                     </div>
                 </div>
 
                 <div id="statsTableSection" class="stats-section">
                     <h3>Details pro Landkreis / Gemeinde</h3>
-                    <div style="max-height: 300px; overflow-y: auto;">
-                        <table id="statsTable">
+                    <div style="max-height: 300px; overflow-y: auto; overflow-x: auto;">
+                        <table id="statsTable" style="width: 100%; min-width: 400px;">
                             <thead>
                                 <tr>
                                     <th data-sort="name" style="cursor: pointer;">Name ↕</th>
