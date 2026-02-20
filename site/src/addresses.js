@@ -116,7 +116,7 @@ class CorrectionModal {
 
                         <div id="corr-official-container" style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; display:none;">
                              <input type="checkbox" id="corr-official" style="width: auto; margin: 0;">
-                             <label for="corr-official" style="font-size: 0.9em; color: #4b5563; cursor: help;" title="Korrekturen werden gesammelt an die zuständige Behöre mit Bitte um Bearbeitung übermittelt">Offizielle Meldung?</label>
+                             <label for="corr-official" style="font-size: 0.9em; color: #4b5563; cursor: help;" title="Korrekturen werden gesammelt an die zuständige Behörde mit Bitte um Bearbeitung übermittelt">Offizielle Meldung?</label>
                         </div>
 
                         <label style="display: block; margin-bottom: 0.25rem; font-size: 0.9em; color: #4b5563;">Kommentar</label>
