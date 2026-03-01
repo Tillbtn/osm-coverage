@@ -135,16 +135,16 @@ def expand_complex_addresses(df, extra_separators=None, desc="Splitting Addresse
     
     return df
 
-def clean_nrw_street_suffixes(df):
+def remove_short_suffixes(df):
     """
-    Removes 2-letter suffixes from street names found in some NRW datasets (e.g. "Frankenstr. Ju")
+    Removes 2-letter suffixes from street names.
+    Used for 'Köln' where suffixes like ' Ei', ' Au', ' Po' are common artifacts.
     """
     if 'street' not in df.columns: return df
     
-    # Check if we have any streets ending in Space + 2 letters
-    # Exclude common valid 2-letter endings like "Au" or "Aa", and Roman numerals
-    regex = r'\s+(?!(?:Au|Aa|Oy|Ut|II|IV|VI|IX|XI)$)[A-Za-zäöüßÄÖÜ]{2}$'
-    df['street'] = df['street'].astype(str).str.replace(regex, "", regex=True).str.strip()
+    regex = r'\s+[A-Za-zäöüßÄÖÜ]{2}$'
+
+    df['street'] = df['street'].astype(str).str.strip().str.replace(regex, "", regex=True).str.strip()
     return df
 
 def clean_nds_street_suffixes(df):
@@ -438,14 +438,14 @@ def process_nrw(directory):
                         norm_gdf['district'] = district
                         norm_gdf['state'] = 'NRW'
                         
-                        # Apply NRW specific cleaning & Splitting
-                        norm_gdf = clean_nrw_street_suffixes(norm_gdf)
-                        
                         extra_seps = None
                         if district in ["Aachen Städteregion", "Aachen_Städteregion", "Aachen, Städteregion"]:
                              extra_seps = ['/']
                              
                         norm_gdf = expand_complex_addresses(norm_gdf, extra_separators=extra_seps)
+
+                        if "Köln" in district:
+                            norm_gdf = remove_short_suffixes(norm_gdf)
                         
                         results.append(norm_gdf)
                     else:

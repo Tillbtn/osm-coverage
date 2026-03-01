@@ -519,13 +519,27 @@ def main():
         # Apply KGV Filter (Brandenburg specific)
         FILTER_KGV = True 
         if FILTER_KGV and state == 'bb':
-            # Filter addresses containing "Kleingarten" or starting with "KGV"
-            mask_kgv = alkis['street'].str.contains(r'Kleingarten|KGV', case=False, regex=True, na=False)
+            # Filter addresses containing "Kleingarten" or starting with "KGV/KGA"
+            mask_kgv = alkis['street'].str.contains(r'Kleingarten|KGV|KGA', case=False, regex=True, na=False)
             
             if mask_kgv.any():
-                print(f"[{state}] Marking {mask_kgv.sum()} KGV/Kleingarten addresses as ignored.")                
+                print(f"[{state}] Marking {mask_kgv.sum()} KGV/Kleingarten/KGA addresses as ignored.")                
                 mask_apply = mask_kgv & alkis['correction_type'].isna()
                 if mask_apply.any():
+                    # Save original before ignoring
+                    if 'original_street' not in alkis.columns:
+                        alkis['original_street'] = pd.NA
+                    if 'original_housenumber' not in alkis.columns:
+                        alkis['original_housenumber'] = pd.NA
+
+                    mask_no_orig = mask_apply & alkis['original_street'].isna()
+                    if mask_no_orig.any():
+                         alkis.loc[mask_no_orig, 'original_street'] = alkis.loc[mask_no_orig, 'street']
+
+                    mask_orig_hnr_nan = mask_apply & alkis['original_housenumber'].isna()
+                    if mask_orig_hnr_nan.any():
+                         alkis.loc[mask_orig_hnr_nan, 'original_housenumber'] = alkis.loc[mask_orig_hnr_nan, 'housenumber']
+
                     alkis.loc[mask_apply, 'correction_type'] = 'ignored'
                     alkis.loc[mask_apply, 'correction_comment'] = 'Automatisch ignoriert: Kleingarten'
 

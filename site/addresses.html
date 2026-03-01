@@ -14,11 +14,14 @@
     <div id="container">
         <header>
             <h1>OSM-ALKIS Adressenvergleich</h1>
+            <button id="menu-toggle" class="menu-toggle" aria-label="Menü öffnen">
+                ☰
+            </button>
             <!-- <nav style="margin-bottom: 10px;">
                 <a href="buildings.html" style="color: white; text-decoration: underline;">Fehlende Gebäude</a>
             </nav> -->
             <div class="header-controls">
-                <select id="stateSelect" style="margin-right: 10px;">
+                <select id="stateSelect">
                     <option value="">Bundesland wählen...</option>
                 </select>
                 <select id="districtSelect">
@@ -27,7 +30,7 @@
                 <div id="stats">
                     Lädt Statistiken...
                 </div>
-                <div id="controls" style="display: flex; gap: 10px;">
+                <div id="controls">
                     <button onclick="toggleStats()">Statistiken</button>
                 </div>
             </div>

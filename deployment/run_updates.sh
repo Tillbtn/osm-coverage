@@ -32,15 +32,13 @@ while true; do
         # python scripts/02_extract_alkis.py
 
         # 3. Fetch OSM
-        # Using 03_import_pbf.py (Addresses)
-        echo "Running 03_import_pbf_optimized.py..."
-        #python scripts/03_import_pbf.py
-        python scripts/03_import_pbf_optimized.py
+        # Using 03_import_osm.py (Addresses)
+        echo "Running 03_import_osm.py..."
+        python scripts/03_import_osm.py
 
         # 4. Compare
-        echo "Running 04_compare_optimized.py..."
-        # python scripts/04_compare.py
-        python scripts/04_compare_optimized.py
+        echo "Running 04_compare.py..."
+        python scripts/04_compare.py
 
         # Backup History logic (persisted in data/backups)
         echo "Backing up history..."

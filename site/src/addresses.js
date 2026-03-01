@@ -387,6 +387,26 @@ const historyUrl = state ? `/states/${state}/${state}_history.json` : '/detailed
 // Init Map
 const map = createMap('map');
 
+
+// Initialize Hamburger Menu
+const menuToggle = document.getElementById('menu-toggle');
+const headerControls = document.querySelector('.header-controls');
+if (menuToggle && headerControls) {
+    menuToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        headerControls.classList.toggle('open');
+        menuToggle.setAttribute('aria-expanded', headerControls.classList.contains('open'));
+    });
+
+    // Close menu when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!headerControls.contains(e.target) && !menuToggle.contains(e.target)) {
+            headerControls.classList.remove('open');
+            menuToggle.setAttribute('aria-expanded', 'false');
+        }
+    });
+}
+
 // Map View
 const initialLat = parseFloat(document.body.dataset.centerLat) || config.center[0];
 const initialLng = parseFloat(document.body.dataset.centerLng) || config.center[1];
@@ -438,7 +458,7 @@ class CorrectionModal {
 
                         <div id="corr-official-container" style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; display:none;">
                              <input type="checkbox" id="corr-official" style="width: auto; margin: 0;">
-                             <label for="corr-official" style="font-size: 0.9em; color: #4b5563; cursor: help;" title="Korrekturen werden gesammelt an die zuständige Behöre mit Bitte um Bearbeitung übermittelt">Offizielle Meldung?</label>
+                             <label for="corr-official" style="font-size: 0.9em; color: #4b5563; cursor: help;" title="Korrekturen werden gesammelt an die zuständige Behörde mit Bitte um Bearbeitung übermittelt">Offizielle Meldung?</label>
                         </div>
 
                         <label style="display: block; margin-bottom: 0.25rem; font-size: 0.9em; color: #4b5563;">Kommentar</label>
