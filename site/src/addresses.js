@@ -355,11 +355,11 @@ function loadDistrict(name, preserveView = false) {
 
 
 const STATE_CONFIG = {
+    bb: { center: [52.36, 13.0], zoom: 9, name: "Brandenburg" },
     hh: { center: [53.55, 10.0], zoom: 11, name: "Hamburg" },
     nds: { center: [52.9, 9.8], zoom: 9, name: "Niedersachsen" },
     nrw: { center: [51.4, 7.6], zoom: 9, name: "Nordrhein-Westfalen" },
     rlp: { center: [49.9, 7.3], zoom: 9, name: "Rheinland-Pfalz" },
-    bb: { center: [52.36, 13.0], zoom: 9, name: "Brandenburg" },
     he: { center: [50.65, 9.16], zoom: 9, name: "Hessen" },
     st: { center: [52.0, 11.7], zoom: 9, name: "Sachsen-Anhalt" }
 };
