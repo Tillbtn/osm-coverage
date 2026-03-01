@@ -10,7 +10,7 @@ import numpy as np
 import tqdm
 import argparse
 
-def normalize_key(street, hnr):
+def normalize_street(street):
     s = str(street).lower()
     s = re.sub(r'\(.*?\)', '', s)
     s = s.replace("ß", "ss")
@@ -29,7 +29,10 @@ def normalize_key(street, hnr):
     s = s.replace("bauerschaft", "")
     s = s.replace("gerhard-hauptmann", "gerhart-hauptmann")
     s = s.replace(" ", "").replace("-", "").replace(".", "").replace("/", "").replace(",", "")
-    
+    return s
+
+def normalize_key(street, hnr):
+    s = normalize_street(street)
     h = str(hnr).lower().replace(" ", "").replace(",", "")
     return f"{s}{h}"
 
@@ -624,12 +627,59 @@ def main():
         
         alkis['found_in_osm'] = alkis['alkis_idx'].isin(found_indices)
         
-        # Export preparation
-        if alkis.crs != "EPSG:4326":
-            alkis = alkis.to_crs(epsg=4326)
+        # Identify Missing
+        missing = alkis[~alkis['found_in_osm']].copy()
+        
+        # Wrong Street Detection
+        print(f"[{state}] Identifying 'wrong_street' candidates for {len(missing)} missing addresses...")
+        if len(missing) > 0 and len(osm) > 0:
+            try:
+                # sjoin_nearest with max_distance
+                nn_join = gpd.sjoin_nearest(
+                    missing[['geometry', 'alkis_idx', 'street', 'housenumber']], 
+                    osm[['geometry', 'street', 'housenumber']], 
+                    how='left',
+                    distance_col='dist_nn',
+                    max_distance=20.0
+                )
+                
+                # Handle duplicates (nearest first)
+                nn_join = nn_join[~nn_join.index.duplicated(keep='first')]
+                
+                # Filter for matching house numbers but differing street names
+                def is_wrong_street(row):
+                    if pd.isna(row['street_right']):
+                        return False
+                    s_alkis = normalize_street(row['street_left'])
+                    s_osm = normalize_street(row['street_right'])
+                    h_alkis = str(row['housenumber_left']).lower().strip()
+                    h_osm = str(row['housenumber_right']).lower().strip()
+                    
+                    return (s_alkis != s_osm) and (h_alkis == h_osm)
+                
+                mask_wrong_street_join = nn_join.apply(is_wrong_street, axis=1)
+                wrong_street_indices = nn_join[mask_wrong_street_join]['alkis_idx'].values
+                
+                print(f"[{state}] Found {len(wrong_street_indices)} 'wrong_street' cases.")
+                
+                # Apply 'wrong_street' correction type to alkis
+                mask_apply = alkis['alkis_idx'].isin(wrong_street_indices)
+                alkis.loc[mask_apply, 'correction_type'] = 'wrong_street'
+                
+                # Create a mapping from alkis_idx to the found OSM street
+                osm_street_map = nn_join[mask_wrong_street_join].set_index('alkis_idx')['street_right'].to_dict()
+                
+                # Vectorized map approach for speed using alkis_idx
+                alkis['osm_street'] = alkis['alkis_idx'].map(osm_street_map)
+
+            except Exception as e:
+                print(f"[{state}] Error during wrong_street detection: {e}")
         
         missing = alkis[~alkis['found_in_osm']]
         
+        # Export preparation
+        if alkis.crs != "EPSG:4326":
+            alkis = alkis.to_crs(epsg=4326)
         state_total = len(alkis)
         state_missing = len(missing)
         state_osm_count = len(osm)
@@ -781,17 +831,21 @@ def main():
             # GeoJSON Export
             matches_corrected = pd.DataFrame()
             if 'correction_type' in district_alkis.columns:
+                # Corrected matches OR explicitly ignored (exclude wrong_street, which are essentially 'missing')
                 matches_corrected = district_alkis[
                     (district_alkis['found_in_osm'] & district_alkis['correction_type'].notna()) |
                     (district_alkis['correction_type'] == 'ignored')
                 ].copy()
-            matches_corrected['matched'] = True
-            
-            # Combine missing with corrected matches
-            missing_export = district_missing.copy()
-            missing_export['matched'] = False
-            
-            combined_export = pd.concat([missing_export, matches_corrected], ignore_index=True)
+                
+                missing_export = district_missing.copy()
+                missing_export['matched'] = False
+                matches_corrected['matched'] = True
+                
+                combined_export = pd.concat([missing_export, matches_corrected], ignore_index=True)
+            else:
+                missing_export = district_missing.copy()
+                missing_export['matched'] = False
+                combined_export = missing_export
             
             cols_to_export = ['street', 'housenumber', 'geometry', 'matched']
             if 'correction_type' in combined_export.columns:
@@ -806,6 +860,8 @@ def main():
                  cols_to_export.append('alkis_id')
             if 'official_report' in combined_export.columns:
                  cols_to_export.append('official_report')
+            if 'osm_street' in combined_export.columns:
+                 cols_to_export.append('osm_street')
                 
             final_export = combined_export[cols_to_export]
             

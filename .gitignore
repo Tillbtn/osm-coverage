@@ -1,5 +1,6 @@
 # Python
 .venv
+scripts/__pycache__/
 
 # Node
 site/node_modules/
@@ -8,10 +9,13 @@ site/dist/
 # Data
 data/
 site/public/
+Server-Backup/
+backups/
 
 # Legacy
 scripts/old/
 site_old/
+deployment/old/
 
 # Testing
 testing/
