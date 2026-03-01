@@ -11,6 +11,8 @@ data/
 site/public/
 Server-Backup/
 backups/
+logs/
+public_data/
 
 # Legacy
 scripts/old/
