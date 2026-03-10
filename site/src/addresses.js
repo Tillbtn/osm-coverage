@@ -213,38 +213,43 @@ function loadDistrict(name, preserveView = false) {
                             const container = document.createElement('div');
                             let content = "";
 
+                            // ALKIS ignored
                             if (props.correction_type === 'ignored') {
                                 content = `<strong>${title}</strong><br>
                                                 <div style="margin-bottom: 4px;">
                                                     <span style="color: #666; font-size: 0.9em;">ALKIS:</span><br>
                                                     ${origStreet} ${origHnr}
                                                 </div>`;
+                                // wrong street
                             } else if (props.correction_type === 'wrong_street') {
+                                // normal
                                 if (props.original_street === '<NA>') {
-                                content = `<strong>${title}</strong><br>
-                                                <div style="margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid #eee;">
-                                                    <span style="color: #666; font-size: 0.9em;">ALKIS:</span><br>
-                                                    ${origStreet} ${origHnr}
-                                                </div>
-                                                <div style="margin-bottom: 8px;">
-                                                    <span style="color: #666; font-size: 0.9em;">OSM:</span><br>
-                                                        ${props.osm_street || '-'} ${props.osm_housenumber || '-'}
-                                                </div>`;
-                                } else {
                                     content = `<strong>${title}</strong><br>
                                                     <div style="margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid #eee;">
-                                                        <span style="color: #666; font-size: 0.9em;">ALKIS (original):</span><br>
+                                                        <span style="color: #666; font-size: 0.9em;">ALKIS:</span><br>
                                                         ${origStreet} ${origHnr}
                                                     </div>
+                                                    <div style="margin-bottom: 8px;">
+                                                        <span style="color: #666; font-size: 0.9em;">OSM:</span><br>
+                                                        ${props.osm_street || '-'} ${hnr}
+                                                    </div>`;
+                                    // ALKIS corrected, still wrong street
+                                } else {
+                                    content = `<strong>${title}</strong><br>
                                                     <div style="margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid #eee;">
                                                         <span style="color: #666; font-size: 0.9em;">ALKIS (korrigiert):</span><br>
                                                         ${street} ${hnr}
                                                     </div>
+                                                     <div style="margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid #eee;">
+                                                        <span style="color: #666; font-size: 0.9em;">ALKIS (original):</span><br>
+                                                        ${origStreet} ${origHnr}
+                                                    </div>
                                                     <div style="margin-bottom: 8px;">
                                                         <span style="color: #666; font-size: 0.9em;">OSM:</span><br>
-                                                        ${props.osm_street || '-'} ${props.osm_housenumber || '-'}
+                                                        ${props.osm_street || '-'} ${hnr}
                                                     </div>`;
                                 }
+                                // ALKIS corrected, matched
                             } else if (isMatched && (props.original_street || props.original_housenumber)) {
                                 content = `<strong>${title}</strong><br>
                                                 <div style="margin-bottom: 4px;">
@@ -255,7 +260,20 @@ function loadDistrict(name, preserveView = false) {
                                                     <span style="color: #666; font-size: 0.9em;">OSM:</span><br>
                                                     ${street} ${hnr}
                                                 </div>`;
-                            } else {
+                                // ALKIS corrected, not matched
+                            } else if (props.original_street !== '<NA>' || props.original_housenumber !== '<NA>') {
+                                content = `<strong>${title}</strong><br>
+                                                <div style="margin-bottom: 4px;">
+                                                    <span style="color: #666; font-size: 0.9em;">ALKIS (korrigiert):</span><br>
+                                                    ${street} ${hnr}
+                                                </div>
+                                                <div style="margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid #eee;">
+                                                        <span style="color: #666; font-size: 0.9em;">ALKIS (original):</span><br>
+                                                        ${origStreet} ${origHnr}
+                                                </div>`;
+                            }
+                            // normal missing
+                            else {
                                 content = `<strong>${title}</strong><br>${street} ${hnr}<br><br>`;
                             }
 
