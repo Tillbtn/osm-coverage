@@ -150,12 +150,17 @@ def remove_short_suffixes(df):
 def clean_nds_street_suffixes(df):
     """
     Removes suffixes starting with a comma followed by text (non-digits) from NDS data.
+    And removes '-xx-' suffixes from street names. #TODO: refactor
     """
     if 'street' not in df.columns: return df
     
     # Pattern: comma, optional whitespace, non-digits until end of string
-    regex = r',\s*[^0-9]+$'
-    df['street'] = df['street'].astype(str).str.replace(regex, "", regex=True).str.strip()
+    regex1 = r',\s*[^0-9]+$'
+    df['street'] = df['street'].astype(str).str.replace(regex1, "", regex=True).str.strip()
+    
+    # Pattern: '-xx-' suffix
+    regex2 = r'-[A-Za-zäöüßÄÖÜ]{2}-$'
+    df['street'] = df['street'].astype(str).str.replace(regex2, "", regex=True).str.strip()
     return df
 
 def normalize_columns(gdf):
