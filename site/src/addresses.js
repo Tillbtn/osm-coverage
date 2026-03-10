@@ -220,6 +220,7 @@ function loadDistrict(name, preserveView = false) {
                                                     ${origStreet} ${origHnr}
                                                 </div>`;
                             } else if (props.correction_type === 'wrong_street') {
+                                if (props.original_street === '<NA>') {
                                 content = `<strong>${title}</strong><br>
                                                 <div style="margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid #eee;">
                                                     <span style="color: #666; font-size: 0.9em;">ALKIS:</span><br>
@@ -227,8 +228,23 @@ function loadDistrict(name, preserveView = false) {
                                                 </div>
                                                 <div style="margin-bottom: 8px;">
                                                     <span style="color: #666; font-size: 0.9em;">OSM:</span><br>
-                                                    ${props.osm_street || '-'} ${origHnr}
+                                                        ${props.osm_street || '-'} ${props.osm_housenumber || '-'}
                                                 </div>`;
+                                } else {
+                                    content = `<strong>${title}</strong><br>
+                                                    <div style="margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid #eee;">
+                                                        <span style="color: #666; font-size: 0.9em;">ALKIS (original):</span><br>
+                                                        ${origStreet} ${origHnr}
+                                                    </div>
+                                                    <div style="margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid #eee;">
+                                                        <span style="color: #666; font-size: 0.9em;">ALKIS (korrigiert):</span><br>
+                                                        ${street} ${hnr}
+                                                    </div>
+                                                    <div style="margin-bottom: 8px;">
+                                                        <span style="color: #666; font-size: 0.9em;">OSM:</span><br>
+                                                        ${props.osm_street || '-'} ${props.osm_housenumber || '-'}
+                                                    </div>`;
+                                }
                             } else if (isMatched && (props.original_street || props.original_housenumber)) {
                                 content = `<strong>${title}</strong><br>
                                                 <div style="margin-bottom: 4px;">
