@@ -42,6 +42,10 @@ STATES = {
     "st": {
         "pbf_url": "https://download.geofabrik.de/europe/germany/sachsen-anhalt-latest.osm.pbf",
         "pbf_file": "sachsen-anhalt-latest.osm.pbf"
+    },
+    "sn": {
+        "pbf_url": "https://download.geofabrik.de/europe/germany/sachsen-latest.osm.pbf",
+        "pbf_file": "sachsen-latest.osm.pbf"
     }
 }
 
