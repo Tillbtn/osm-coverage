@@ -54,16 +54,16 @@ def apply_corrections(alkis_df, corrections_file, state):
     """
     # Initialize correction columns if they don't exist
     if 'correction_type' not in alkis_df.columns:
-        alkis_df['correction_type'] = pd.NA
+        alkis_df['correction_type'] = None
         alkis_df['correction_type'] = alkis_df['correction_type'].astype('object')
     if 'correction_comment' not in alkis_df.columns:
-        alkis_df['correction_comment'] = pd.NA
+        alkis_df['correction_comment'] = None
         alkis_df['correction_comment'] = alkis_df['correction_comment'].astype('object')
     if 'original_street' not in alkis_df.columns:
-        alkis_df['original_street'] = pd.NA
+        alkis_df['original_street'] = None
         alkis_df['original_street'] = alkis_df['original_street'].astype('object')
     if 'original_housenumber' not in alkis_df.columns:
-        alkis_df['original_housenumber'] = pd.NA
+        alkis_df['original_housenumber'] = None
         alkis_df['original_housenumber'] = alkis_df['original_housenumber'].astype('object')
     if 'official_report' not in alkis_df.columns:
         alkis_df['official_report'] = False
@@ -529,9 +529,9 @@ def main():
                 if mask_apply.any():
                     # Save original before ignoring
                     if 'original_street' not in alkis.columns:
-                        alkis['original_street'] = pd.NA
+                        alkis['original_street'] = None
                     if 'original_housenumber' not in alkis.columns:
-                        alkis['original_housenumber'] = pd.NA
+                        alkis['original_housenumber'] = None
 
                     mask_no_orig = mask_apply & alkis['original_street'].isna()
                     if mask_no_orig.any():
