@@ -28,6 +28,16 @@ function mapDistrictName(shapeName, stateStr, dData) {
     return shapeName;
 }
 
+function getCoverageColor(coverage) {
+    if (coverage === undefined || coverage === null) return '#94a3b8'; // Slate 400
+    if (coverage > 98) return '#059669'; // Green 600
+    if (coverage > 95) return '#34d399'; // Green 400
+    if (coverage > 85) return '#fbbf24'; // Amber 400
+    if (coverage > 75) return '#f59e0b'; // Amber 500
+    if (coverage > 50) return '#f97316'; // Orange 500
+    return '#ef4444'; // Red 500
+}
+
 function renderBoundaries() {
     if (!boundariesLayer || !globalBoundariesGeoJSON) return;
     boundariesLayer.clearLayers();
@@ -704,12 +714,18 @@ Promise.all([
                 return mappedName !== currentDistrictName;
             },
             style: function (feature) {
+                const name = feature.properties.LANDKREIS || feature.properties.GEN || feature.properties.NAM;
+                const mappedName = mapDistrictName(name, state, districtsData);
+                const dStats = districtsData ? districtsData.find(d => d.name === mappedName) : null;
+                const coverage = dStats ? dStats.coverage : null;
+                const color = getCoverageColor(coverage);
+
                 return {
-                    color: '#3b82f6',
+                    color: color,
                     weight: 2,
-                    fillColor: '#3b82f6',
-                    fillOpacity: 0.1,
-                    opacity: 0.5
+                    fillColor: color,
+                    fillOpacity: 0.2,
+                    opacity: 0.6
                 };
             },
             onEachFeature: function (feature, layer) {
