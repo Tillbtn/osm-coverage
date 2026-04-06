@@ -13,6 +13,38 @@ let sortCol = 'name';
 let sortAsc = true;
 let historyDataStore = null;
 
+let boundariesLayer = null;
+let globalBoundariesGeoJSON = null;
+
+function mapDistrictName(shapeName, stateStr, dData) {
+    if (dData) {
+        let match = dData.find(d => d.name === shapeName);
+        if (match) return match.name;
+
+        let underscored = shapeName.replace(/ /g, '_');
+        match = dData.find(d => d.name === underscored);
+        if (match) return match.name;
+    }
+    return shapeName;
+}
+
+function getCoverageColor(coverage) {
+    if (coverage === undefined || coverage === null) return '#94a3b8'; // Slate 400
+    if (coverage > 98) return '#059669'; // Green 600
+    if (coverage > 95) return '#34d399'; // Green 400
+    if (coverage > 85) return '#fbbf24'; // Amber 400
+    if (coverage > 75) return '#f59e0b'; // Amber 500
+    if (coverage > 50) return '#f97316'; // Orange 500
+    return '#ef4444'; // Red 500
+}
+
+function renderBoundaries() {
+    if (!boundariesLayer || !globalBoundariesGeoJSON) return;
+    boundariesLayer.clearLayers();
+    boundariesLayer.addData(globalBoundariesGeoJSON);
+    boundariesLayer.bringToBack();
+}
+
 // Legend Visibility State
 const defaultVisibility = {
     missing: true,
@@ -64,6 +96,7 @@ function loadDistrict(name, preserveView = false) {
         }
         document.getElementById('stats').innerText = `gesamt: ${totalMissing} fehlende Adressen`;
         if (!preserveView) map.setView([initialLat, initialLng], initialZoom);
+        if (typeof renderBoundaries === 'function') renderBoundaries();
         return;
     }
 
@@ -379,10 +412,12 @@ function loadDistrict(name, preserveView = false) {
 
             const missingCount = data.features.filter(f => !f.properties.matched).length;
             document.getElementById('stats').innerText = `${missingCount} fehlende Adressen`;
+            if (typeof renderBoundaries === 'function') renderBoundaries();
         })
         .catch(err => {
             console.error(err);
             document.getElementById('stats').innerText = 'Fehler beim Laden (oder keine Daten vorhanden).';
+            if (typeof renderBoundaries === 'function') renderBoundaries();
         });
 }
 
@@ -418,6 +453,7 @@ if (state && config.name) {
 // Path Construction
 const districtsUrl = state ? `/states/${state}/${state}_districts.json` : '/districts.json';
 const historyUrl = state ? `/states/${state}/${state}_history.json` : '/detailed_history.json';
+const boundariesUrl = state ? `/states/${state}/${state}_district_boundaries.geojson` : null;
 
 // Init Map
 const map = createMap('map');
@@ -693,14 +729,70 @@ const correctionModal = new CorrectionModal();
 
 Promise.all([
     state ? fetchDistricts(districtsUrl) : Promise.resolve([]),
-    state ? fetchHistory(historyUrl) : Promise.resolve({ global: [], districts: {} })
-]).then(([districts, history]) => {
+    state ? fetchHistory(historyUrl) : Promise.resolve({ global: [], districts: {} }),
+    boundariesUrl ? fetchGeoJSON(boundariesUrl).catch(() => null) : Promise.resolve(null)
+]).then(([districts, history, boundariesGeoJSON]) => {
     if (!state) {
         districts = [];
         history = { global: [], districts: {} };
     }
     districtsData = districts;
     historyDataStore = history;
+    globalBoundariesGeoJSON = boundariesGeoJSON;
+
+    if (globalBoundariesGeoJSON) {
+        boundariesLayer = L.geoJSON(null, {
+            filter: function (feature) {
+                if (!feature.properties) return false;
+                const name = feature.properties.LANDKREIS || feature.properties.GEN || feature.properties.NAM;
+                const mappedName = mapDistrictName(name, state, districtsData);
+                return mappedName !== currentDistrictName;
+            },
+            style: function (feature) {
+                const name = feature.properties.LANDKREIS || feature.properties.GEN || feature.properties.NAM;
+                const mappedName = mapDistrictName(name, state, districtsData);
+                const dStats = districtsData ? districtsData.find(d => d.name === mappedName) : null;
+                const coverage = dStats ? dStats.coverage : null;
+                const color = getCoverageColor(coverage);
+
+                return {
+                    color: color,
+                    weight: 2,
+                    fillColor: color,
+                    fillOpacity: 0.2,
+                    opacity: 0.6
+                };
+            },
+            onEachFeature: function (feature, layer) {
+                layer.on({
+                    mouseover: function (e) {
+                        const target = e.target;
+                        target.setStyle({
+                            fillOpacity: 0.3,
+                            weight: 3
+                        });
+                    },
+                    mouseout: function (e) {
+                        if (boundariesLayer) boundariesLayer.resetStyle(e.target);
+                    },
+                    click: function (e) {
+                        const name = feature.properties.LANDKREIS || feature.properties.GEN || feature.properties.NAM;
+                        const mappedName = mapDistrictName(name, state, districtsData);
+
+                        const sel = document.getElementById('districtSelect');
+                        if (sel) {
+                            sel.value = mappedName;
+                            loadDistrict(mappedName);
+                        }
+                    }
+                });
+
+                const name = feature.properties.LANDKREIS || feature.properties.GEN || feature.properties.NAM;
+                const mappedName = mapDistrictName(name, state, districtsData);
+                layer.bindTooltip(mappedName.replace(/_/g, ' '), { className: 'district-tooltip', direction: 'center', permanent: false });
+            }
+        }).addTo(map);
+    }
 
     // Populate Main Select
     const select = document.getElementById('districtSelect');
