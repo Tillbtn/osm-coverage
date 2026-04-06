@@ -225,8 +225,8 @@ function loadDistrict(name, preserveView = false) {
                             const hnr = props.housenumber || '';
                             const isMatched = props.matched;
                             const comment = isValid(props.correction_comment) ? props.correction_comment : '';
-                            const origStreet = (props.original_street && props.original_street !== '<NA>') ? props.original_street : street;
-                            const origHnr = (props.original_housenumber && props.original_housenumber !== '<NA>') ? props.original_housenumber : hnr;
+                            const origStreet = props.original_street ? props.original_street : street;
+                            const origHnr = props.original_housenumber ? props.original_housenumber : hnr;
                             const alkisId = props.alkis_id;
 
                             const lat = layer.getLatLng().lat;
@@ -246,22 +246,43 @@ function loadDistrict(name, preserveView = false) {
                             const container = document.createElement('div');
                             let content = "";
 
+                            // ALKIS ignored
                             if (props.correction_type === 'ignored') {
                                 content = `<strong>${title}</strong><br>
                                                 <div style="margin-bottom: 4px;">
                                                     <span style="color: #666; font-size: 0.9em;">ALKIS:</span><br>
                                                     ${origStreet} ${origHnr}
                                                 </div>`;
+                                // wrong street
                             } else if (props.correction_type === 'wrong_street') {
-                                content = `<strong>${title}</strong><br>
-                                                <div style="margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid #eee;">
-                                                    <span style="color: #666; font-size: 0.9em;">ALKIS:</span><br>
-                                                    ${origStreet} ${origHnr}
-                                                </div>
-                                                <div style="margin-bottom: 8px;">
-                                                    <span style="color: #666; font-size: 0.9em;">OSM:</span><br>
-                                                    ${props.osm_street || '-'} ${origHnr}
-                                                </div>`;
+                                // normal
+                                if (!props.original_street) {
+                                    content = `<strong>${title}</strong><br>
+                                                    <div style="margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid #eee;">
+                                                        <span style="color: #666; font-size: 0.9em;">ALKIS:</span><br>
+                                                        ${origStreet} ${origHnr}
+                                                    </div>
+                                                    <div style="margin-bottom: 8px;">
+                                                        <span style="color: #666; font-size: 0.9em;">OSM:</span><br>
+                                                        ${props.osm_street || '-'} ${hnr}
+                                                    </div>`;
+                                    // ALKIS corrected, still wrong street
+                                } else {
+                                    content = `<strong>${title}</strong><br>
+                                                    <div style="margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid #eee;">
+                                                        <span style="color: #666; font-size: 0.9em;">ALKIS (korrigiert):</span><br>
+                                                        ${street} ${hnr}
+                                                    </div>
+                                                     <div style="margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid #eee;">
+                                                        <span style="color: #666; font-size: 0.9em;">ALKIS (original):</span><br>
+                                                        ${origStreet} ${origHnr}
+                                                    </div>
+                                                    <div style="margin-bottom: 8px;">
+                                                        <span style="color: #666; font-size: 0.9em;">OSM:</span><br>
+                                                        ${props.osm_street || '-'} ${hnr}
+                                                    </div>`;
+                                }
+                                // ALKIS corrected, matched
                             } else if (isMatched && (props.original_street || props.original_housenumber)) {
                                 content = `<strong>${title}</strong><br>
                                                 <div style="margin-bottom: 4px;">
@@ -272,7 +293,20 @@ function loadDistrict(name, preserveView = false) {
                                                     <span style="color: #666; font-size: 0.9em;">OSM:</span><br>
                                                     ${street} ${hnr}
                                                 </div>`;
-                            } else {
+                                // ALKIS corrected, not matched
+                            } else if (props.original_street || props.original_housenumber) {
+                                content = `<strong>${title}</strong><br>
+                                                <div style="margin-bottom: 4px;">
+                                                    <span style="color: #666; font-size: 0.9em;">ALKIS (korrigiert):</span><br>
+                                                    ${street} ${hnr}
+                                                </div>
+                                                <div style="margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid #eee;">
+                                                        <span style="color: #666; font-size: 0.9em;">ALKIS (original):</span><br>
+                                                        ${origStreet} ${origHnr}
+                                                </div>`;
+                            }
+                            // normal missing
+                            else {
                                 content = `<strong>${title}</strong><br>${street} ${hnr}<br><br>`;
                             }
 
@@ -396,6 +430,7 @@ const STATE_CONFIG = {
     nrw: { center: [51.4, 7.6], zoom: 9, name: "Nordrhein-Westfalen" },
     rlp: { center: [49.9, 7.3], zoom: 9, name: "Rheinland-Pfalz" },
     he: { center: [50.65, 9.16], zoom: 9, name: "Hessen" },
+    sn: { center: [50.9, 12.7], zoom: 9, name: "Sachsen" },
     st: { center: [52.0, 11.7], zoom: 9, name: "Sachsen-Anhalt" }
 };
 
@@ -870,9 +905,9 @@ Promise.all([
 });
 
 
-// Helper to check if a property is valid (not null/undefined and not "<NA>" string from pandas)
+// Helper to check if a property is valid (not null/undefined/empty)
 function isValid(val) {
-    return val !== null && val !== undefined && val !== "<NA>" && val !== "nan" && val !== "";
+    return val !== null && val !== undefined && val !== "nan" && val !== "";
 }
 
 // Helper to get done list from localStorage

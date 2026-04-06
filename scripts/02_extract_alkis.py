@@ -22,6 +22,7 @@ DIR_BB = os.path.join(DATA_DIR, "bb")
 DIR_HH = os.path.join(DATA_DIR, "hh")
 DIR_HE = os.path.join(DATA_DIR, "he")
 DIR_ST = os.path.join(DATA_DIR, "st")
+DIR_SN = os.path.join(DATA_DIR, "sn")
 
 def remove_ortsteil(text):
     """
@@ -150,12 +151,17 @@ def remove_short_suffixes(df):
 def clean_nds_street_suffixes(df):
     """
     Removes suffixes starting with a comma followed by text (non-digits) from NDS data.
+    And removes '-xx-' suffixes from street names. #TODO: refactor
     """
     if 'street' not in df.columns: return df
     
     # Pattern: comma, optional whitespace, non-digits until end of string
-    regex = r',\s*[^0-9]+$'
-    df['street'] = df['street'].astype(str).str.replace(regex, "", regex=True).str.strip()
+    regex1 = r',\s*[^0-9]+$'
+    df['street'] = df['street'].astype(str).str.replace(regex1, "", regex=True).str.strip()
+    
+    # Pattern: '-xx-' suffix
+    regex2 = r'-[A-Za-zäöüßÄÖÜ]{2}-$'
+    df['street'] = df['street'].astype(str).str.replace(regex2, "", regex=True).str.strip()
     return df
 
 def normalize_columns(gdf):
@@ -1030,6 +1036,77 @@ def process_st(directory):
     return results
 
 
+def process_sn(directory):
+    csv_files = glob.glob(os.path.join(directory, "*.csv"))
+    if not csv_files:
+        csv_files = glob.glob(os.path.join(os.path.dirname(directory), "*.csv"))
+        
+    if not csv_files:
+        print(f"[SN] No CSV files found in {directory}.")
+        return []
+
+    results = []
+    
+    for csv_path in csv_files:
+        print(f"[SN] Processing {os.path.basename(csv_path)}...")
+        try:
+            df = pd.read_csv(csv_path, sep=';', dtype=str, encoding='utf-8', on_bad_lines='skip')
+            df.columns = df.columns.str.lower()
+            
+            required = ['str', 'hnr', 'ostwert', 'nordwert']
+            if not all(col in df.columns for col in required):
+                print(f"[SN] Missing columns in {csv_path}. Found: {df.columns.tolist()}")
+                continue
+
+            df = df.dropna(subset=required)
+            df = df[df['hnr'] != '0']
+            
+            def format_sn_housenumber(row):
+                hnr = str(row['hnr'])
+                adz = str(row['adz']) if pd.notna(row['adz']) and row['adz'] != '' else ""
+                
+                if not adz:
+                    return hnr
+                    
+                if adz[0].isdigit():
+                    return f"{hnr}/{adz}"
+                    
+                adz_mod = re.sub(r'([pP][0-9]+)', r'/\1', adz)
+                return f"{hnr}{adz_mod}"
+                
+            df['housenumber'] = df.apply(format_sn_housenumber, axis=1)
+            
+            rename_dict = {
+                'str': 'street',
+                'gmd': 'district',
+                'postplz': 'postcode'
+            }
+            
+            df = df.rename(columns=rename_dict)
+            if 'postcode' not in df.columns:
+                df['postcode'] = None
+            df['city'] = df['district']
+            
+            x = pd.to_numeric(df['ostwert'], errors='coerce')
+            y = pd.to_numeric(df['nordwert'], errors='coerce')
+            
+            gdf = gpd.GeoDataFrame(
+                df[['street', 'housenumber', 'postcode', 'city', 'district']],
+                geometry=gpd.points_from_xy(x, y),
+                crs="EPSG:25833"
+            )
+            
+            gdf = gdf.to_crs("EPSG:25832")
+            gdf = gdf[gdf.geometry.is_valid & ~gdf.geometry.is_empty]
+            gdf['state'] = 'Sachsen'
+            
+            results.append(gdf)
+            
+        except Exception as e:
+            print(f"[SN] Error processing {csv_path}: {e}")
+            
+    return results
+
 def main():
     process_state("NDS", DIR_NDS, process_nds)
     process_state("NRW", DIR_NRW, process_nrw)
@@ -1038,6 +1115,7 @@ def main():
     process_state("HH", DIR_HH, process_hh)
     process_state("HE", DIR_HE, process_he)
     process_state("ST", DIR_ST, process_st)
+    process_state("SN", DIR_SN, process_sn)
 
 if __name__ == "__main__":
     main()

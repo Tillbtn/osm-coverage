@@ -43,7 +43,8 @@ STATES = {
     "bb": { "pbf_file": "brandenburg-latest.osm.pbf" },
     "hh": { "pbf_file": "hamburg-latest.osm.pbf" },
     "he": { "pbf_file": "hessen-latest.osm.pbf" },
-    "st": { "pbf_file": "sachsen-anhalt-latest.osm.pbf" }
+    "st": { "pbf_file": "sachsen-anhalt-latest.osm.pbf" },
+    "sn": { "pbf_file": "sachsen-latest.osm.pbf" }
 }
 
 
@@ -53,16 +54,16 @@ def apply_corrections(alkis_df, corrections_file, state):
     """
     # Initialize correction columns if they don't exist
     if 'correction_type' not in alkis_df.columns:
-        alkis_df['correction_type'] = pd.NA
+        alkis_df['correction_type'] = None
         alkis_df['correction_type'] = alkis_df['correction_type'].astype('object')
     if 'correction_comment' not in alkis_df.columns:
-        alkis_df['correction_comment'] = pd.NA
+        alkis_df['correction_comment'] = None
         alkis_df['correction_comment'] = alkis_df['correction_comment'].astype('object')
     if 'original_street' not in alkis_df.columns:
-        alkis_df['original_street'] = pd.NA
+        alkis_df['original_street'] = None
         alkis_df['original_street'] = alkis_df['original_street'].astype('object')
     if 'original_housenumber' not in alkis_df.columns:
-        alkis_df['original_housenumber'] = pd.NA
+        alkis_df['original_housenumber'] = None
         alkis_df['original_housenumber'] = alkis_df['original_housenumber'].astype('object')
     if 'official_report' not in alkis_df.columns:
         alkis_df['official_report'] = False
@@ -477,7 +478,7 @@ def expand_address_ranges(df):
     return df
 
 def main():
-    STATES_LIST = ["nds", "nrw", "rlp", "bb", "hh", "he", "st"]
+    STATES_LIST = ["nds", "nrw", "rlp", "bb", "hh", "he", "st", "sn"]
     
     ENABLE_FLEXIBLE_PARSING = True
     
@@ -528,9 +529,9 @@ def main():
                 if mask_apply.any():
                     # Save original before ignoring
                     if 'original_street' not in alkis.columns:
-                        alkis['original_street'] = pd.NA
+                        alkis['original_street'] = None
                     if 'original_housenumber' not in alkis.columns:
-                        alkis['original_housenumber'] = pd.NA
+                        alkis['original_housenumber'] = None
 
                     mask_no_orig = mask_apply & alkis['original_street'].isna()
                     if mask_no_orig.any():
@@ -542,6 +543,39 @@ def main():
 
                     alkis.loc[mask_apply, 'correction_type'] = 'ignored'
                     alkis.loc[mask_apply, 'correction_comment'] = 'Automatisch ignoriert: Kleingarten'
+
+        # NDS specific changes
+        if state == "nds":
+            # Filter addresses for Wulfetannen in Osnabrück
+            mask_nds = (alkis['district'] == 'Osnabrück') & (alkis['street'] == 'Wulfetannen')
+            
+            if mask_nds.any():
+                ref_id = '8cabc3839fb7'
+                ref_row = alkis[alkis['alkis_id'] == ref_id]
+                if not ref_row.empty:
+                    ref_geom = ref_row.iloc[0].geometry
+                    candidates = alkis[mask_nds]
+                    dists = candidates.geometry.distance(ref_geom)
+                    mask_nds &= (dists <= 1000)
+
+                    print(f"[{state}] Marking {mask_nds.sum()} 'Wulfetannen' addresses as ignored.")                
+                    mask_apply = mask_nds & alkis['correction_type'].isna()
+                    if mask_apply.any():
+                        if 'original_street' not in alkis.columns:
+                            alkis['original_street'] = None
+                        if 'original_housenumber' not in alkis.columns:
+                            alkis['original_housenumber'] = None
+
+                        mask_no_orig = mask_apply & alkis['original_street'].isna()
+                        if mask_no_orig.any():
+                             alkis.loc[mask_no_orig, 'original_street'] = alkis.loc[mask_no_orig, 'street']
+
+                        mask_orig_hnr_nan = mask_apply & alkis['original_housenumber'].isna()
+                        if mask_orig_hnr_nan.any():
+                             alkis.loc[mask_orig_hnr_nan, 'original_housenumber'] = alkis.loc[mask_orig_hnr_nan, 'housenumber']
+
+                        alkis.loc[mask_apply, 'correction_type'] = 'ignored'
+                        alkis.loc[mask_apply, 'correction_comment'] = 'Automatisch ignoriert: Ferienhaussiedlung (vor Ort erst Buchstabe, dann Zahl)'
 
         # Expand Aachen Addresses
         if state == "nrw":
