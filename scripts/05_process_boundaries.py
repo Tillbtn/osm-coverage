@@ -85,7 +85,7 @@ CONFIG = {
     "sn": {
         "type": "file",
         "input": "data/boundaries/sn/vwg20250101_33_sachsen/gem.shp", # https://www.geodaten.sachsen.de/downloadbereich-verwaltungsgrenzen-4344.html
-        "tolerance": 0.005,
+        "tolerance": 0.001,
     },
     "hh": {
         "type": "osm",
@@ -163,6 +163,48 @@ def process_state(state, cfg):
     elif not found_col and 'GEN' not in gdf.columns:
         print(f"Warning: No valid name column found in {list(gdf.columns)}")
 
+    # Apply Mappings
+    if 'GEN' in gdf.columns:
+        if state == 'nds':
+            mapping = {
+                'Grafschaft Bentheim': 'Grafschaft_Bentheim',
+                'Nienburg (Weser)': 'Nienburg',
+                'Region Hannover': 'Region_Hannover',
+                'Rotenburg (Wümme)': 'Rotenburg_Wümme',
+                'Stadt Braunschweig (kreisfrei)': 'Stadt_Braunschweig',
+                'Stadt Delmenhorst (kreisfrei)': 'Stadt_Delmenhorst',
+                'Stadt Emden (kreisfrei)': 'Stadt_Emden',
+                'Stadt Oldenburg (Oldb) (kreisfrei)': 'Stadt_Oldenburg',
+                'Stadt Osnabrück (kreisfrei)': 'Stadt_Osnabrück',
+                'Stadt Salzgitter (kreisfrei)': 'Stadt_Salzgitter',
+                'Stadt Wilhelmshaven (kreisfrei)': 'Stadt_Wilhelmshaven',
+                'Stadt Wolfsburg (kreisfrei)': 'Stadt_Wolfsburg'
+            }
+            gdf['GEN'] = gdf['GEN'].apply(lambda x: mapping.get(x, x))
+            
+        elif state == 'nrw':
+            mapping = {
+                'Städteregion Aachen': 'Aachen, Städteregion',
+                'Oberbergischer Kreis': 'Oberberg.-Kreis',
+                'Rheinisch-Bergischer Kreis': 'Rhein.-Berg.-Kreis',
+                'Mülheim a.d. Ruhr': 'Mülheim Ruhr',
+            }
+            gdf['GEN'] = gdf['GEN'].apply(lambda x: mapping.get(x, x))
+            
+        elif state == 'sn':
+            districts_file = os.path.join(out_dir, f"{state}_districts.json")
+            if os.path.exists(districts_file):
+                with open(districts_file, 'r', encoding='utf-8') as f:
+                    ddata = json.load(f)
+                alkis_names = {d['name'] for d in ddata}
+                
+                def map_sn(name):
+                    if not isinstance(name, str): return name
+                    if f"Stadt {name}" in alkis_names: return f"Stadt {name}"
+                    return name
+                    
+                gdf['GEN'] = gdf['GEN'].apply(map_sn)
+
     # Convert to 4326 if needed
     if "force_crs" in cfg:
         print(f"Forcing CRS to {cfg['force_crs']}...")
@@ -187,8 +229,21 @@ def process_state(state, cfg):
             initial_len = len(gdf)
             gdf = gdf[~gdf['GEN'].astype(str).str.contains("Stove", case=False, na=False)]
             print(f"HH Filter: Removed {initial_len - len(gdf)} 'Stove' regions.")
+
+    elif state == "he":
+        if 'GEN' in gdf.columns:
+            initial_len = len(gdf)
+            gdf = gdf[~gdf['GEN'].isin(["Gutsbezirk Kaufunger Wald", "Gemarkung Michelbuch (gemeindefrei)"])]
+            if initial_len != len(gdf):
+                print(f"HE Filter: Removed {initial_len - len(gdf)} out-of-bounds regions.")
     
     elif state == "st":
+        if 'GEN' in gdf.columns:
+            initial_len = len(gdf)
+            gdf = gdf[~gdf['GEN'].isin(["Thierschneck", "Walpernhain", "Dommitzsch", "Rühstädt"])]
+            if initial_len != len(gdf):
+                print(f"ST Filter: Removed {initial_len - len(gdf)} out-of-bounds regions.")
+
         if 'admin_level' in gdf.columns:
             l8 = gdf[gdf['admin_level'] == '8']
             l6 = gdf[gdf['admin_level'] == '6']
@@ -239,6 +294,31 @@ def process_state(state, cfg):
 
     print(f"Writing GeoJSON to {out_file}...")
     try:
+        districts_file = os.path.join(out_dir, f"{state}_districts.json")
+        if os.path.exists(districts_file):
+            with open(districts_file, 'r', encoding='utf-8') as f:
+                ddata = json.load(f)
+            expected_names = {d['name'] for d in ddata}
+            
+            if 'GEN' in gdf.columns:
+                matched_mask = gdf['GEN'].isin(expected_names)
+                unmatched = gdf[~matched_mask]['GEN'].unique()
+                matched_alkis = set(gdf[matched_mask]['GEN'])
+                
+                unmapped_expected = expected_names - matched_alkis
+                if len(unmatched) > 0 or len(unmapped_expected) > 0:
+                    print(f"\n[Validation] {state.upper()} has unmatched districts:")
+                    if len(unmatched) > 0:
+                        print(f"  Only in boundaries ({len(unmatched)}):")
+                        for n in unmatched:
+                            print(f"    - {n}")
+                    if len(unmapped_expected) > 0:
+                        print(f"  Only in districts list ({len(unmapped_expected)}):")
+                        for n in sorted(list(unmapped_expected)):
+                            print(f"    - {n}")
+                else:
+                    print(f"\n[Validation] {state.upper()} matched all districts!")
+
         gdf.to_file(out_file, driver="GeoJSON")
         print(f"Done processing {state}. Features: {len(gdf)}")
     except Exception as e:
