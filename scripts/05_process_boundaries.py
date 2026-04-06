@@ -233,6 +233,13 @@ def process_state(state, cfg):
     elif state == "he":
         if 'GEN' in gdf.columns:
             initial_len = len(gdf)
+            gdf = gdf[~gdf['GEN'].isin(["Lenzerwische"])]
+            if initial_len != len(gdf):
+                print(f"BB Filter: Removed {initial_len - len(gdf)} out-of-bounds regions.")
+
+    elif state == "bb":
+        if 'GEN' in gdf.columns:
+            initial_len = len(gdf)
             gdf = gdf[~gdf['GEN'].isin(["Gutsbezirk Kaufunger Wald", "Gemarkung Michelbuch (gemeindefrei)"])]
             if initial_len != len(gdf):
                 print(f"HE Filter: Removed {initial_len - len(gdf)} out-of-bounds regions.")
