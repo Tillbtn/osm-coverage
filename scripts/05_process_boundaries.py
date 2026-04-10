@@ -140,21 +140,45 @@ def process_state(state, cfg):
 
     # Handle Special RLP Case
     if cfg.get("is_rlp"):
-        districts_file = 'site/public/states/rlp/rlp_districts.json'
-        if os.path.exists(districts_file):
-            with open(districts_file, 'r', encoding='utf-8') as f:
-                ddata = json.load(f)
-            expected_names = {d['name'] for d in ddata}
-            name_c = cfg.get("name_col", "text")
-            
-            initial = len(gdf)
-            if name_c in gdf.columns:
-                gdf = gdf[gdf[name_c].isin(expected_names)].copy()
-                
-            if 'LocalisedCharacterString' in gdf.columns:
-                gdf = gdf[gdf['LocalisedCharacterString'].isna() | (gdf['LocalisedCharacterString'] == '')]
-                
-            print(f"RLP Filter: {initial} down to {len(gdf)}")
+        name_c = cfg.get("name_col", "text")
+        
+        # Extract "Kreise" boundaries
+        is_district = gdf['LocalisedCharacterString'].str.contains('kreis', case=False, na=False)
+        districts_gdf = gdf[is_district].copy()
+        
+        # Extract "Gemeinden" boundaries
+        muni_mask = gdf['LocalisedCharacterString'].isna() | (gdf['LocalisedCharacterString'] == '')
+        municipalities_gdf = gdf[muni_mask].copy()
+
+        # Spatial Join
+        joined = gpd.sjoin(
+            municipalities_gdf, 
+            districts_gdf[[name_c, 'geometry']], 
+            how='left', 
+            predicate='within',
+            lsuffix='muni', 
+            rsuffix='dist'
+        )
+
+        # Logic for duplicate names
+        muni_name_col = f"{name_c}_muni"
+        dist_name_col = f"{name_c}_dist"
+        counts = joined[muni_name_col].value_counts()
+        duplicate_names = counts[counts > 1].index
+
+        def rename_with_district(row):
+            original_name = row[muni_name_col]
+            district_name = row[dist_name_col]
+            if original_name in duplicate_names and pd.notna(district_name):
+                return f"{original_name} ({district_name})"
+            return original_name
+
+        joined['GEN'] = joined.apply(rename_with_district, axis=1)
+
+        # Only keep the "Gemeinde" boundaries, delete the "Kreise" boundaries
+        gdf = joined[['GEN', 'geometry']].copy()
+        
+        print(f"RLP: {len(gdf)} Gemeinden ready for export.")
 
     # Resolve Name Column
     found_col = resolve_name_col(gdf, cfg.get("name_col"))

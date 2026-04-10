@@ -45,6 +45,19 @@ function renderBoundaries() {
     boundariesLayer.bringToBack();
 }
 
+function zoomToDistrictBoundary(name) {
+    if (!globalBoundariesGeoJSON) return;
+    const feature = globalBoundariesGeoJSON.features.find(f => {
+        const bName = f.properties.LANDKREIS || f.properties.GEN || f.properties.NAM;
+        const mappedName = mapDistrictName(bName, state, districtsData);
+        return mappedName === name;
+    });
+    if (feature) {
+        const tempLayer = L.geoJSON(feature);
+        map.fitBounds(tempLayer.getBounds());
+    }
+}
+
 // Legend Visibility State
 const defaultVisibility = {
     missing: true,
@@ -68,6 +81,7 @@ try {
 function loadDistrict(name, preserveView = false) {
     if (currentLayer) map.removeLayer(currentLayer);
     currentLayer = null;
+    currentDistrictName = name;
 
     // Update URL
     const historyUrl = new URL(window.location);
@@ -101,7 +115,6 @@ function loadDistrict(name, preserveView = false) {
     }
 
     document.getElementById('stats').innerText = `Lade ${name}...`;
-    currentDistrictName = name;
 
     // Construct URL
     let url = "";
@@ -408,6 +421,8 @@ function loadDistrict(name, preserveView = false) {
             currentLayer.addTo(map);
             if (data.features.length > 0 && !preserveView) {
                 map.fitBounds(currentLayer.getBounds());
+            } else if (data.features.length === 0 && !preserveView) {
+                zoomToDistrictBoundary(name);
             }
 
             const missingCount = data.features.filter(f => !f.properties.matched).length;
@@ -417,6 +432,7 @@ function loadDistrict(name, preserveView = false) {
         .catch(err => {
             console.error(err);
             document.getElementById('stats').innerText = 'Fehler beim Laden (oder keine Daten vorhanden).';
+            if (!preserveView) zoomToDistrictBoundary(name);
             if (typeof renderBoundaries === 'function') renderBoundaries();
         });
 }
