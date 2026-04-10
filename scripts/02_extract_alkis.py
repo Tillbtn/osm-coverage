@@ -520,9 +520,18 @@ def process_rlp(directory):
         
         df['housenumber'] = df['hnr'] + df['adz'].fillna('')
         
+        # Identify municipality names that exist in multiple districts
+        collision_gmds = df.groupby('gmd')['kreis'].nunique()
+        collision_gmds = collision_gmds[collision_gmds > 1].index.tolist()
+        
+        # Selectively rename: only if name collision exists
+        df['district'] = df.apply(
+            lambda row: f"{row['gmd']} ({row['kreis']})" if row['gmd'] in collision_gmds else row['gmd'], 
+            axis=1
+        )
+        
         df = df.rename(columns={
             'str': 'street',
-            'gmd': 'district',
             'plz': 'postcode'
         })
         
