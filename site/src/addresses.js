@@ -867,7 +867,7 @@ Promise.all([
     const statsBtn = document.querySelector('#controls button');
     if (statsBtn) {
         statsBtn.removeAttribute('onclick');
-        statsBtn.addEventListener('click', () => statsModal.toggle());
+        statsBtn.addEventListener('click', () => statsModal.toggle(true, currentDistrictName));
     }
 
     // Initial Load
