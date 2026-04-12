@@ -11,6 +11,7 @@ export class StatsModal {
         this.sortCol = 'name';
         this.sortAsc = true;
         this.isVisible = false;
+        this.activeDistrict = null;
 
         this.init();
     }
@@ -31,12 +32,13 @@ export class StatsModal {
 
                 <div class="stats-section">
                     <h3>Verlauf der Abdeckung</h3>
-                    <div style="margin-bottom: 10px;">
+                    <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                         <label for="statsChartSelect">Anzeige für:</label>
-                        <select id="statsChartSelect">
+                        <select id="statsChartSelect" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc;">
                             <option value="global">${this.stateName} (gesamt)</option>
                             <!-- Options populated by JS -->
                         </select>
+                        <button id="resetToGlobalBtn" style="padding: 5px 10px; background: white; color: black; border: 1px solid #3b82f6; border-radius: 4px; cursor: pointer; font-size: 0.9em; min-width: 150px;"></button>
                     </div>
                     <div class="chart-container">
                         <canvas id="historyChart"></canvas>
@@ -117,13 +119,28 @@ export class StatsModal {
         });
 
         // Stats Chart Select
+        if (this.historyData && this.historyData.states) {
+            const stateGroup = document.createElement('optgroup');
+            stateGroup.label = "Bundesländer";
+            Object.keys(this.historyData.states).forEach(stateName => {
+                const opt = document.createElement('option');
+                opt.value = stateName;
+                opt.textContent = stateName;
+                stateGroup.appendChild(opt);
+            });
+            this.statsSelect.appendChild(stateGroup);
+        }
+
         if (this.districtsData) {
+            const districtGroup = document.createElement('optgroup');
+            districtGroup.label = "Landkreise / Gemeinden";
             this.districtsData.forEach(d => {
                 const opt = document.createElement('option');
                 opt.value = d.name;
                 opt.textContent = d.name.replace(/_/g, ' ');
-                this.statsSelect.appendChild(opt);
+                districtGroup.appendChild(opt);
             });
+            this.statsSelect.appendChild(districtGroup);
         }
 
         this.statsSelect.addEventListener('change', (e) => {
@@ -137,7 +154,24 @@ export class StatsModal {
 
             const tableSection = document.getElementById('statsTableSection');
             if (tableSection) tableSection.style.display = isGlobal ? 'block' : 'none';
+
+            this.updateToggleButton();
         });
+
+        // Reset to Global Button
+        const toggleBtn = document.getElementById('resetToGlobalBtn');
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', () => {
+                if (this.statsSelect.value === 'global') {
+                    if (this.activeDistrict) {
+                        this.statsSelect.value = this.activeDistrict;
+                    }
+                } else {
+                    this.statsSelect.value = 'global';
+                }
+                this.statsSelect.dispatchEvent(new Event('change'));
+            });
+        }
 
         // Comparison Chart Mode Select
         if (this.compModeSelect) {
@@ -232,12 +266,53 @@ export class StatsModal {
         this.renderStatsTable();
     }
 
-    toggle(show) {
+    toggle(show, selectedDistrict) {
         if (typeof show === 'boolean') {
             this.isVisible = show;
         } else {
             this.isVisible = !this.isVisible;
         }
+
+        if (this.isVisible) {
+            if (selectedDistrict) {
+                if (selectedDistrict !== "Global") {
+                    this.activeDistrict = selectedDistrict;
+                }
+                const val = selectedDistrict === "Global" ? "global" : selectedDistrict;
+                if (this.statsSelect.value !== val) {
+                    this.statsSelect.value = val;
+                    // Trigger change logic
+                    const dataset = updateChart(val, this.historyData);
+                    renderHistoryTable(dataset, '#historyTable tbody');
+
+                    const isGlobal = (val === "global");
+                    const compSection = document.getElementById('comparisonChartSection');
+                    if (compSection) compSection.style.display = isGlobal ? 'block' : 'none';
+
+                    const tableSection = document.getElementById('statsTableSection');
+                    if (tableSection) tableSection.style.display = isGlobal ? 'block' : 'none';
+                }
+            }
+            this.updateToggleButton();
+        }
+
         this.modalElement.style.display = this.isVisible ? 'block' : 'none';
+    }
+
+    updateToggleButton() {
+        const toggleBtn = document.getElementById('resetToGlobalBtn');
+        if (!toggleBtn) return;
+
+        if (this.statsSelect.value === 'global') {
+            if (this.activeDistrict) {
+                toggleBtn.textContent = `${this.activeDistrict.replace(/_/g, ' ')} anzeigen`;
+                toggleBtn.style.display = 'inline-block';
+            } else {
+                toggleBtn.style.display = 'none';
+            }
+        } else {
+            toggleBtn.textContent = `${this.stateName} anzeigen`;
+            toggleBtn.style.display = 'inline-block';
+        }
     }
 }

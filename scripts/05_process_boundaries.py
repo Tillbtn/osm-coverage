@@ -355,20 +355,78 @@ def process_state(state, cfg):
     except Exception as e:
         print(f"Failed to write output: {e}")
 
+def process_germany_boundary():
+    print(f"\n--- Processing GERMANY (States) ---", flush=True)
+    input_path = "data/boundaries/state_boundaries.geojson"
+    out_file = "site/public/state_boundaries.geojson"
+    
+    if not os.path.exists(input_path):
+        print(f"Skipping Germany: Input {input_path} not found.")
+        return
+
+    print(f"Reading {input_path}...", flush=True)
+    try:
+        gdf = gpd.read_file(input_path, engine="pyogrio")
+    except Exception as e:
+        print(f"Failed to read file: {e}")
+        return
+
+    initial_count = len(gdf)
+    gdf = gdf[gdf.geom_type.isin(['Polygon', 'MultiPolygon'])]
+    print(f"Filter: Kept {len(gdf)}/{initial_count} Polygon/MultiPolygon features.")
+
+    # only the states that are in the comparison
+    selected_states = [
+        "Brandenburg", "Hamburg", "Niedersachsen", "Nordrhein-Westfalen", 
+        "Rheinland-Pfalz", "Hessen", "Sachsen", "Sachsen-Anhalt"
+    ]
+    
+    name_col = None
+    for col in ['name', 'NAME', 'GEN']:
+        if col in gdf.columns:
+            name_col = col
+            break
+            
+    if not name_col:
+        print(f"Error: No name column found. Columns: {gdf.columns.tolist()}")
+        return
+
+    gdf = gdf[gdf[name_col].isin(selected_states)]
+    print(f"Filter: Kept {len(gdf)} states matching the comparison list.")
+
+    if name_col != 'GEN':
+        gdf = gdf.rename(columns={name_col: 'GEN'})
+    
+    # Simplify
+    print("Simplifying geometries (tolerance 0.005)...")
+    gdf.geometry = gdf.geometry.simplify(tolerance=0.005, preserve_topology=True)
+    
+    # Keep only GEN and geometry
+    gdf = gdf[['GEN', 'geometry']]
+    
+    print(f"Writing GeoJSON to {out_file}...")
+    gdf.to_file(out_file, driver="GeoJSON")
+    print(f"Done processing Germany. States: {len(gdf)}")
+
 def main():
     parser = argparse.ArgumentParser(description="Process boundary shapes into GeoJSON.")
-    parser.add_argument("--state", type=str, help="Process a specific state (e.g. nds, nrw).")
+    parser.add_argument("--state", type=str, help="Process a specific state (e.g. nds, nrw) or 'germany' for state boundaries.")
     args = parser.parse_args()
     
     if args.state:
         state = args.state.lower()
-        if state in CONFIG:
+        if state == "germany":
+            process_germany_boundary()
+        elif state in CONFIG:
             process_state(state, CONFIG[state])
         else:
             print(f"Unknown state: {state}")
     else:
+        # Process all states
         for state, cfg in CONFIG.items():
             process_state(state, cfg)
+        # And Germany
+        process_germany_boundary()
 
 if __name__ == "__main__":
     main()
