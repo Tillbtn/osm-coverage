@@ -459,8 +459,8 @@ const state = stateFromUrl || document.body.dataset.state;
 
 const config = STATE_CONFIG[state] || { center: [51.16, 10.45], zoom: 6, name: "Deutschland" };
 
-// Update Page Title if State is present
-if (state && config.name) {
+// Update Page Title
+if (config.name) {
     document.title = `OSM-ALKIS Adressenvergleich - ${config.name}`;
     const h1 = document.querySelector('h1');
     if (h1) h1.innerText = `OSM-ALKIS Adressenvergleich (${config.name})`;
@@ -738,20 +738,103 @@ class CorrectionModal {
             });
     }
 }
-
-
 const correctionModal = new CorrectionModal();
 
 
-Promise.all([
-    state ? fetchDistricts(districtsUrl) : Promise.resolve([]),
-    state ? fetchHistory(historyUrl) : Promise.resolve({ global: [], districts: {} }),
-    boundariesUrl ? fetchGeoJSON(boundariesUrl).catch(() => null) : Promise.resolve(null)
-]).then(([districts, history, boundariesGeoJSON]) => {
-    if (!state) {
-        districts = [];
-        history = { global: [], districts: {} };
-    }
+let loadPromise;
+
+if (state) {
+    loadPromise = Promise.all([
+        fetchDistricts(districtsUrl),
+        fetchHistory(historyUrl),
+        boundariesUrl ? fetchGeoJSON(boundariesUrl).catch(() => null) : Promise.resolve(null)
+    ]);
+} else {
+    // Deutschland (Gesamt) Mode: Aggregate all states
+    const statesToLoad = Object.keys(STATE_CONFIG);
+    loadPromise = Promise.all([
+        Promise.all(statesToLoad.map(s =>
+            Promise.all([
+                fetch(`/states/${s}/${s}_districts.json`).then(res => res.json()).catch(() => []),
+                fetch(`/states/${s}/${s}_history.json`).then(res => res.json()).catch(() => ({ global: [], districts: {} }))
+            ]).then(([d, h]) => ({ state: s, districts: d, history: h }))
+        )),
+        fetchGeoJSON('/state_boundaries.geojson').catch(() => null)
+    ]).then(([allStateData, stateBoundaries]) => {
+        let mergedDistricts = [];
+        let mergedHistory = { global: [], districts: {}, states: {} };
+
+        // Prepare unique dates and state histories
+        const allDatesSet = new Set();
+        const stateHistoryMaps = {};
+        const firstPointByState = {};
+
+        allStateData.forEach(item => {
+            const stateHist = item.history.global || [];
+            const historyMap = {};
+            stateHist.forEach(h => {
+                const d = h.date.split('T')[0];
+                historyMap[d] = h;
+                allDatesSet.add(d);
+            });
+            stateHistoryMaps[item.state] = historyMap;
+            if (stateHist.length > 0) {
+                firstPointByState[item.state] = stateHist[0];
+            }
+        });
+
+        const sortedDates = Array.from(allDatesSet).sort();
+
+        // Global aggregation with stabilization
+        mergedHistory.global = sortedDates.map(date => {
+            const aggregated = { date: date + "T12:00:00Z", total: 0, missing: 0, osm: 0 };
+
+            allStateData.forEach(item => {
+                const historyMap = stateHistoryMaps[item.state];
+                let point = historyMap[date];
+
+                if (!point) {
+                    // Stabilization: Use the earliest known point if we are before the state's range
+                    point = firstPointByState[item.state];
+                }
+
+                if (point) {
+                    aggregated.total += (point.total || point.alkis || 0);
+                    aggregated.missing += (point.missing || point.missing_count || 0);
+                    aggregated.osm += (point.osm || 0);
+                }
+            });
+
+            aggregated.coverage = aggregated.total > 0 ? (1 - (aggregated.missing / aggregated.total)) * 100 : 0;
+            return aggregated;
+        });
+
+        // Districts and States
+        allStateData.forEach(item => {
+            const stateConf = STATE_CONFIG[item.state];
+            const stateName = stateConf ? stateConf.name : item.state;
+
+            item.districts.forEach(d => {
+                const districtCopy = { ...d };
+                districtCopy.name = `${d.name} (${item.state.toUpperCase()})`;
+                districtCopy.originalName = d.name;
+                mergedDistricts.push(districtCopy);
+            });
+
+            mergedHistory.states[stateName] = item.history.global || [];
+
+            if (item.history.districts) {
+                Object.entries(item.history.districts).forEach(([dName, dHist]) => {
+                    mergedHistory.districts[`${dName} (${item.state.toUpperCase()})`] = dHist;
+                });
+            }
+        });
+
+        return [mergedDistricts, mergedHistory, stateBoundaries];
+    });
+}
+
+loadPromise.then(([districts, history, boundariesGeoJSON]) => {
     districtsData = districts;
     historyDataStore = history;
     globalBoundariesGeoJSON = boundariesGeoJSON;

@@ -119,13 +119,28 @@ export class StatsModal {
         });
 
         // Stats Chart Select
+        if (this.historyData && this.historyData.states) {
+            const stateGroup = document.createElement('optgroup');
+            stateGroup.label = "Bundesländer";
+            Object.keys(this.historyData.states).forEach(stateName => {
+                const opt = document.createElement('option');
+                opt.value = stateName;
+                opt.textContent = stateName;
+                stateGroup.appendChild(opt);
+            });
+            this.statsSelect.appendChild(stateGroup);
+        }
+
         if (this.districtsData) {
+            const districtGroup = document.createElement('optgroup');
+            districtGroup.label = "Landkreise / Gemeinden";
             this.districtsData.forEach(d => {
                 const opt = document.createElement('option');
                 opt.value = d.name;
                 opt.textContent = d.name.replace(/_/g, ' ');
-                this.statsSelect.appendChild(opt);
+                districtGroup.appendChild(opt);
             });
+            this.statsSelect.appendChild(districtGroup);
         }
 
         this.statsSelect.addEventListener('change', (e) => {
