@@ -843,54 +843,81 @@ loadPromise.then(([districts, history, boundariesGeoJSON]) => {
         boundariesLayer = L.geoJSON(null, {
             filter: function (feature) {
                 if (!feature.properties) return false;
+                if (!state) return true; // Show all states in Deutschland mode
                 const name = feature.properties.LANDKREIS || feature.properties.GEN || feature.properties.NAM;
                 const mappedName = mapDistrictName(name, state, districtsData);
                 return mappedName !== currentDistrictName;
             },
             style: function (feature) {
-                const name = feature.properties.LANDKREIS || feature.properties.GEN || feature.properties.NAM;
-                const mappedName = mapDistrictName(name, state, districtsData);
-                const dStats = districtsData ? districtsData.find(d => d.name === mappedName) : null;
-                const coverage = dStats ? dStats.coverage : null;
+                const name = feature.properties.GEN || feature.properties.NAME || feature.properties.NAM;
+                let coverage = null;
+
+                if (!state) {
+                    // colourize by state coverage
+                    const stateHistory = historyDataStore.states ? historyDataStore.states[name] : null;
+                    if (stateHistory && stateHistory.length > 0) {
+                        const last = stateHistory[stateHistory.length - 1];
+                        coverage = last.coverage;
+                    }
+                } else {
+                    // colourize by district coverage
+                    const mappedName = mapDistrictName(name, state, districtsData);
+                    const dStats = districtsData ? districtsData.find(d => d.name === mappedName) : null;
+                    coverage = dStats ? dStats.coverage : null;
+                }
+
                 const color = getCoverageColor(coverage);
 
                 return {
                     color: color,
-                    weight: 2,
+                    weight: state ? 2 : 3,
                     fillColor: color,
                     fillOpacity: 0.2,
                     opacity: 0.6
                 };
             },
             onEachFeature: function (feature, layer) {
+                const name = feature.properties.GEN || feature.properties.NAME || feature.properties.NAM;
+
                 layer.on({
                     mouseover: function (e) {
                         const target = e.target;
                         target.setStyle({
                             fillOpacity: 0.3,
-                            weight: 3
+                            weight: state ? 3 : 5
                         });
                     },
                     mouseout: function (e) {
                         if (boundariesLayer) boundariesLayer.resetStyle(e.target);
                     },
                     click: function (e) {
-                        const name = feature.properties.LANDKREIS || feature.properties.GEN || feature.properties.NAM;
-                        const mappedName = mapDistrictName(name, state, districtsData);
-
-                        const sel = document.getElementById('districtSelect');
-                        if (sel) {
-                            sel.value = mappedName;
-                            loadDistrict(mappedName);
+                        if (!state) {
+                            // redirect to state
+                            const stateEntry = Object.entries(STATE_CONFIG).find(([id, config]) => config.name === name);
+                            if (stateEntry) {
+                                window.location.href = `addresses.html?state=${stateEntry[0]}`;
+                            }
+                        } else {
+                            // redirect to district
+                            const mappedName = mapDistrictName(name, state, districtsData);
+                            const sel = document.getElementById('districtSelect');
+                            if (sel) {
+                                sel.value = mappedName;
+                                loadDistrict(mappedName);
+                            }
                         }
                     }
                 });
 
-                const name = feature.properties.LANDKREIS || feature.properties.GEN || feature.properties.NAM;
-                const mappedName = mapDistrictName(name, state, districtsData);
-                layer.bindTooltip(mappedName.replace(/_/g, ' '), { className: 'district-tooltip', direction: 'center', permanent: false });
+                let label = name;
+                if (state) {
+                    const mappedName = mapDistrictName(name, state, districtsData);
+                    label = mappedName.replace(/_/g, ' ');
+                }
+                layer.bindTooltip(label, { className: 'district-tooltip', direction: 'center', permanent: false });
             }
         }).addTo(map);
+        boundariesLayer.addData(globalBoundariesGeoJSON);
     }
 
     // Populate Main Select
