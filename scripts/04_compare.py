@@ -44,7 +44,8 @@ STATES = {
     "hh": { "pbf_file": "hamburg-latest.osm.pbf" },
     "he": { "pbf_file": "hessen-latest.osm.pbf" },
     "st": { "pbf_file": "sachsen-anhalt-latest.osm.pbf" },
-    "sn": { "pbf_file": "sachsen-latest.osm.pbf" }
+    "sn": { "pbf_file": "sachsen-latest.osm.pbf" },
+    "be": { "pbf_file": "berlin-latest.osm.pbf" }
 }
 
 
@@ -478,7 +479,7 @@ def expand_address_ranges(df):
     return df
 
 def main():
-    STATES_LIST = ["nds", "nrw", "rlp", "bb", "hh", "he", "st", "sn"]
+    STATES_LIST = ["nds", "nrw", "rlp", "bb", "hh", "he", "st", "sn", "be"]
     
     ENABLE_FLEXIBLE_PARSING = True
     

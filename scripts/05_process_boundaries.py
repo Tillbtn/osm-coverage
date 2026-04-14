@@ -99,6 +99,12 @@ CONFIG = {
         "name_col": "text", 
         "tolerance": 0.001,
         "is_rlp": True
+    },
+    "be": {
+        "type": "osm",
+        "input": "data/be/osm/berlin-latest.osm.pbf",
+        "admin_levels": ['9'],
+        "tolerance": 0.0005,
     }
 }
 
@@ -377,8 +383,8 @@ def process_germany_boundary():
 
     # only the states that are in the comparison
     selected_states = [
-        "Brandenburg", "Hamburg", "Niedersachsen", "Nordrhein-Westfalen", 
-        "Rheinland-Pfalz", "Hessen", "Sachsen", "Sachsen-Anhalt"
+        "Berlin", "Brandenburg", "Hamburg", "Hessen", "Niedersachsen", "Nordrhein-Westfalen", 
+        "Rheinland-Pfalz", "Sachsen", "Sachsen-Anhalt"
     ]
     
     name_col = None
