@@ -196,11 +196,28 @@ def process_state(state_key, config):
 
     # Special case: Berlin (be) can reuse Brandenburg (bb) data
     if state_key == "be":
-        bb_parquet = os.path.join(DATA_DIR, "bb", "osm.parquet")
-        if os.path.exists(bb_parquet):
+        bb_config = STATES.get("bb")
+        bb_dir = os.path.join(DATA_DIR, "bb")
+        bb_parquet = os.path.join(bb_dir, "osm.parquet")
+        
+        if bb_config and os.path.exists(bb_parquet):
             print(f"[{state_key}] Brandenburg data found at {bb_parquet}. Reusing it for Berlin.")
             import shutil
             shutil.copy2(bb_parquet, output_parquet)
+            
+            # Also handle PBF for timestamp in script 04
+            bb_pbf_path = os.path.join(bb_dir, "osm", bb_config["pbf_file"])
+            if os.path.exists(bb_pbf_path):
+                if os.path.exists(pbf_path) and not os.path.islink(pbf_path):
+                     os.remove(pbf_path)
+                
+                if not os.path.exists(pbf_path):
+                    try:
+                        os.symlink(os.path.abspath(bb_pbf_path), pbf_path)
+                        print(f"[{state_key}] Symlinked {bb_pbf_path} to {pbf_path}")
+                    except Exception as e:
+                        print(f"[{state_key}] Failed to symlink PBF: {e}. Copying instead...")
+                        shutil.copy2(bb_pbf_path, pbf_path)
             return
     
     downloaded = download_pbf(config["pbf_url"], pbf_path)
