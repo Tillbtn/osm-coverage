@@ -46,6 +46,10 @@ STATES = {
     "sn": {
         "pbf_url": "https://download.geofabrik.de/europe/germany/sachsen-latest.osm.pbf",
         "pbf_file": "sachsen-latest.osm.pbf"
+    },
+    "be": {
+        "pbf_url": "https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf",
+        "pbf_file": "berlin-latest.osm.pbf"
     }
 }
 
@@ -189,6 +193,15 @@ def process_state(state_key, config):
     
     pbf_path = os.path.join(pbf_dir, config["pbf_file"])
     output_parquet = os.path.join(state_dir, "osm.parquet")
+
+    # Special case: Berlin (be) can reuse Brandenburg (bb) data
+    if state_key == "be":
+        bb_parquet = os.path.join(DATA_DIR, "bb", "osm.parquet")
+        if os.path.exists(bb_parquet):
+            print(f"[{state_key}] Brandenburg data found at {bb_parquet}. Reusing it for Berlin.")
+            import shutil
+            shutil.copy2(bb_parquet, output_parquet)
+            return
     
     downloaded = download_pbf(config["pbf_url"], pbf_path)
     

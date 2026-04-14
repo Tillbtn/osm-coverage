@@ -23,6 +23,7 @@ DIR_HH = os.path.join(DATA_DIR, "hh")
 DIR_HE = os.path.join(DATA_DIR, "he")
 DIR_ST = os.path.join(DATA_DIR, "st")
 DIR_SN = os.path.join(DATA_DIR, "sn")
+DIR_BE = os.path.join(DATA_DIR, "be")
 
 def remove_ortsteil(text):
     """
@@ -1116,6 +1117,57 @@ def process_sn(directory):
             
     return results
 
+def process_be(directory):
+    search_dir = os.path.join(directory, "HKO_EPSG25833")
+    txt_files = glob.glob(os.path.join(search_dir, "adressen-*.txt"))
+    
+    if not txt_files:
+        print(f"[BE] No 'adressen-*.txt' files found in {search_dir}")
+        return []
+
+    results = []
+    
+    for txt_path in txt_files:
+        print(f"[BE] Processing {os.path.basename(txt_path)}...")
+        try:
+            # Semicolon separated, no header. 
+            # Indices: 10=Bezirk, 14=Street, 15=Hnr, 16=Adz, 18=X, 19=Y, 20=PLZ
+            df = pd.read_csv(txt_path, sep=';', header=None, dtype=str, encoding='utf-8', on_bad_lines='skip')
+            
+            # Select and rename columns
+            df = df[[10, 14, 15, 16, 18, 19, 20]].copy()
+            df.columns = ['district', 'street', 'hnr', 'adz', 'ostwert', 'nordwert', 'postcode']
+            
+            df = df.dropna(subset=['street', 'hnr', 'ostwert', 'nordwert'])
+            df = df[df['hnr'] != '0']
+            
+            # Combine HNR + ADZ
+            df['housenumber'] = df['hnr'] + df['adz'].fillna('').str.strip()
+            
+            df['city'] = 'Berlin'
+            df['state'] = 'Berlin'
+            
+            x = pd.to_numeric(df['ostwert'], errors='coerce')
+            y = pd.to_numeric(df['nordwert'], errors='coerce')
+            
+            gdf = gpd.GeoDataFrame(
+                df[['street', 'housenumber', 'postcode', 'city', 'district', 'state']],
+                geometry=gpd.points_from_xy(x, y),
+                crs="EPSG:25833"
+            )
+            
+            # Convert to EPSG:25832 for consistency with other states
+            gdf = gdf.to_crs("EPSG:25832")
+            
+            gdf = gdf[gdf.geometry.is_valid & ~gdf.geometry.is_empty]
+            
+            results.append(gdf)
+            
+        except Exception as e:
+            print(f"[BE] Error processing {txt_path}: {e}")
+            
+    return results
+
 def main():
     process_state("NDS", DIR_NDS, process_nds)
     process_state("NRW", DIR_NRW, process_nrw)
@@ -1125,6 +1177,7 @@ def main():
     process_state("HE", DIR_HE, process_he)
     process_state("ST", DIR_ST, process_st)
     process_state("SN", DIR_SN, process_sn)
+    process_state("BE", DIR_BE, process_be)
 
 if __name__ == "__main__":
     main()
