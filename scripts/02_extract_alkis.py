@@ -1173,7 +1173,6 @@ def process_be(directory):
 def process_mv(directory):
     # Expects zipped shapefiles in data/mv/alkis
     
-    # 1. Extract Zips
     zips = glob.glob(os.path.join(directory, "*.zip"))
     for z in tqdm.tqdm(zips, desc="Extracting MV Zips"):
         folder = os.path.splitext(z)[0]
@@ -1184,7 +1183,6 @@ def process_mv(directory):
             except Exception as e:
                 print(f"[MV] Error extracting {z}: {e}")
                 
-    # 2. Find and Process Shapefiles
     results = []
     shps = glob.glob(os.path.join(directory, "**", "*GebaeudeBauwerk.shp"), recursive=True)
     
@@ -1194,16 +1192,12 @@ def process_mv(directory):
         
     for shp in tqdm.tqdm(shps, desc="Processing MV Shapefiles"):
         try:
-            # Read shapefile
-            # Only need lagebeztxt and geometry
             gdf = gpd.read_file(shp, engine='pyogrio')
             
-            # Check for lagebeztxt
             if 'lagebeztxt' not in gdf.columns:
                 print(f"[MV] 'lagebeztxt' not found in {os.path.basename(shp)}")
                 continue
                 
-            # Filter NULL
             gdf = gdf[gdf['lagebeztxt'] != 'NULL']
             
             if gdf.empty:
@@ -1216,67 +1210,6 @@ def process_mv(directory):
                 norm_gdf['state'] = 'MV'
                 norm_gdf['district'] = os.path.basename(os.path.dirname(shp))
                 
-                # Expand complex addresses (e.g. "Str 1, 2")
-                norm_gdf = expand_complex_addresses(norm_gdf)
-                
-                results.append(norm_gdf)
-            else:
-                print(f"[MV] Normalization failed for {os.path.basename(shp)} (Columns: {gdf.columns.tolist()})")
-
-                
-        except Exception as e:
-            print(f"[MV] Error processing {shp}: {e}")
-            
-    return results
-
-
-def process_mv(directory):
-    # Expects zipped shapefiles in data/mv/alkis
-    
-    # 1. Extract Zips
-    zips = glob.glob(os.path.join(directory, "*.zip"))
-    for z in tqdm.tqdm(zips, desc="Extracting MV Zips"):
-        folder = os.path.splitext(z)[0]
-        if not os.path.exists(folder):
-            try:
-                with zipfile.ZipFile(z, 'r') as zf:
-                    zf.extractall(folder)
-            except Exception as e:
-                print(f"[MV] Error extracting {z}: {e}")
-                
-    # 2. Find and Process Shapefiles
-    results = []
-    shps = glob.glob(os.path.join(directory, "**", "*GebaeudeBauwerk.shp"), recursive=True)
-    
-    if not shps:
-        print(f"[MV] No *GebaeudeBauwerk.shp files found in {directory}")
-        return []
-        
-    for shp in tqdm.tqdm(shps, desc="Processing MV Shapefiles"):
-        try:
-            # Read shapefile
-            # Only need lagebeztxt and geometry
-            gdf = gpd.read_file(shp, engine='pyogrio')
-            
-            # Check for lagebeztxt
-            if 'lagebeztxt' not in gdf.columns:
-                print(f"[MV] 'lagebeztxt' not found in {os.path.basename(shp)}")
-                continue
-                
-            # Filter NULL
-            gdf = gdf[gdf['lagebeztxt'] != 'NULL']
-            
-            if gdf.empty:
-                continue
-
-
-            norm_gdf = normalize_columns(gdf)
-            
-            if norm_gdf is not None:
-                norm_gdf['state'] = 'MV'
-                norm_gdf['district'] = os.path.basename(os.path.dirname(shp))
-                
-                # Expand complex addresses (e.g. "Str 1, 2")
                 norm_gdf = expand_complex_addresses(norm_gdf)
                 
                 results.append(norm_gdf)
