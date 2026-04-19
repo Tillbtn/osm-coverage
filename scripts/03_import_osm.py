@@ -15,43 +15,55 @@ import gc
 DATA_DIR = "data"
 
 STATES = {
-    # "nds": {
-    #     "pbf_url": "https://download.geofabrik.de/europe/germany/niedersachsen-latest.osm.pbf",
-    #     "pbf_file": "niedersachsen-latest.osm.pbf"
-    # },
-    # "nrw": {
-    #     "pbf_url": "https://download.geofabrik.de/europe/germany/nordrhein-westfalen-latest.osm.pbf",
-    #     "pbf_file": "nordrhein-westfalen-latest.osm.pbf"
-    # },
-    # "rlp": {
-    #     "pbf_url": "https://download.geofabrik.de/europe/germany/rheinland-pfalz-latest.osm.pbf",
-    #     "pbf_file": "rheinland-pfalz-latest.osm.pbf"
-    # },
-    # "bb": {
-    #     "pbf_url": "https://download.geofabrik.de/europe/germany/brandenburg-latest.osm.pbf",
-    #     "pbf_file": "brandenburg-latest.osm.pbf"
-    # },
-    # "hh": {
-    #     "pbf_url": "https://download.geofabrik.de/europe/germany/hamburg-latest.osm.pbf",
-    #     "pbf_file": "hamburg-latest.osm.pbf"
-    # },
+    "nds": {
+        "pbf_url": "https://download.geofabrik.de/europe/germany/niedersachsen-latest.osm.pbf",
+        "pbf_file": "niedersachsen-latest.osm.pbf"
+    },
+    "nrw": {
+        "pbf_url": "https://download.geofabrik.de/europe/germany/nordrhein-westfalen-latest.osm.pbf",
+        "pbf_file": "nordrhein-westfalen-latest.osm.pbf"
+    },
+    "rlp": {
+        "pbf_url": "https://download.geofabrik.de/europe/germany/rheinland-pfalz-latest.osm.pbf",
+        "pbf_file": "rheinland-pfalz-latest.osm.pbf"
+    },
+    "bb": {
+        "pbf_url": "https://download.geofabrik.de/europe/germany/brandenburg-latest.osm.pbf",
+        "pbf_file": "brandenburg-latest.osm.pbf"
+    },
+    "hh": {
+        "pbf_url": "https://download.geofabrik.de/europe/germany/hamburg-latest.osm.pbf",
+        "pbf_file": "hamburg-latest.osm.pbf"
+    },
+    "he": {
+        "pbf_url": "https://download.geofabrik.de/europe/germany/hessen-latest.osm.pbf",
+        "pbf_file": "hessen-latest.osm.pbf"
+    },
+    "st": {
+        "pbf_url": "https://download.geofabrik.de/europe/germany/sachsen-anhalt-latest.osm.pbf",
+        "pbf_file": "sachsen-anhalt-latest.osm.pbf"
+    },
+    "sn": {
+        "pbf_url": "https://download.geofabrik.de/europe/germany/sachsen-latest.osm.pbf",
+        "pbf_file": "sachsen-latest.osm.pbf"
+    },
+    "be": {
+        "pbf_url": "https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf",
+        "pbf_file": "berlin-latest.osm.pbf"
+    },
     "mv": {
         "pbf_url": "https://download.geofabrik.de/europe/germany/mecklenburg-vorpommern-latest.osm.pbf",
         "pbf_file": "mecklenburg-vorpommern-latest.osm.pbf"
     }
-    ,
-    # "he": {
-    #     "pbf_url": "https://download.geofabrik.de/europe/germany/hessen-latest.osm.pbf",
-    #     "pbf_file": "hessen-latest.osm.pbf"
-    # }
 }
 
 # Optimization: Process in chunks
 CHUNK_SIZE = 10000  
 
 class AddressHandler(osmium.SimpleHandler):
-    def __init__(self):
+    def __init__(self, state_key=None):
         super(AddressHandler, self).__init__()
+        self.state_key = state_key
         self.buffer = []
         self.chunks = []
         self.wkbfab = osmium.geom.WKBFactory()
@@ -69,10 +81,19 @@ class AddressHandler(osmium.SimpleHandler):
             
             if street_val:
                 try:
+                    hnr = tags['addr:housenumber']
+                    h_name = None
+                    
+                    # Extract 'name' if it starts with 'Haus'
+                    name = tags.get('name')
+                    if name and name.lower().startswith('haus'):
+                            h_name = name
+
                     wkb_data = geom_func(obj)
                     self.buffer.append({
                         'street': street_val,
-                        'housenumber': tags['addr:housenumber'],
+                        'housenumber': hnr,
+                        'housename': h_name,
                         # 'postcode': tags.get('addr:postcode', ''), 
                         'city': tags.get('addr:city', ''),
                         'wkb': wkb_data
@@ -132,8 +153,14 @@ class AddressHandler(osmium.SimpleHandler):
 
 def download_pbf(url, local_path):
     print(f"Checking {url}...")
+
+    # headers={
+    #     "Cache-Control": "no-cache",
+    #     "Pragma": "no-cache"
+    # }
     try:
         head_response = requests.head(url)
+        # head_response = requests.head(url, allow_redirects=True, headers=headers, timeout=30)
         head_response.raise_for_status()
         last_modified = head_response.headers.get("Last-Modified")
 
@@ -152,6 +179,7 @@ def download_pbf(url, local_path):
 
     print(f"Downloading {url} to {local_path}...")
     with requests.get(url, stream=True) as r:
+    # with requests.get(url, stream=True, headers=headers, timeout=30) as r:
         r.raise_for_status()
         total_size = int(r.headers.get('content-length', 0))
         block_size = 8192
@@ -169,6 +197,32 @@ def process_state(state_key, config):
     
     pbf_path = os.path.join(pbf_dir, config["pbf_file"])
     output_parquet = os.path.join(state_dir, "osm.parquet")
+
+    # Special case: Berlin (be) can reuse Brandenburg (bb) data
+    if state_key == "be":
+        bb_config = STATES.get("bb")
+        bb_dir = os.path.join(DATA_DIR, "bb")
+        bb_parquet = os.path.join(bb_dir, "osm.parquet")
+        
+        if bb_config and os.path.exists(bb_parquet):
+            print(f"[{state_key}] Brandenburg data found at {bb_parquet}. Reusing it for Berlin.")
+            import shutil
+            shutil.copy2(bb_parquet, output_parquet)
+            
+            # Also handle PBF for timestamp in script 04
+            bb_pbf_path = os.path.join(bb_dir, "osm", bb_config["pbf_file"])
+            if os.path.exists(bb_pbf_path):
+                if os.path.exists(pbf_path) and not os.path.islink(pbf_path):
+                     os.remove(pbf_path)
+                
+                if not os.path.exists(pbf_path):
+                    try:
+                        os.symlink(os.path.abspath(bb_pbf_path), pbf_path)
+                        print(f"[{state_key}] Symlinked {bb_pbf_path} to {pbf_path}")
+                    except Exception as e:
+                        print(f"[{state_key}] Failed to symlink PBF: {e}. Copying instead...")
+                        shutil.copy2(bb_pbf_path, pbf_path)
+            return
     
     downloaded = download_pbf(config["pbf_url"], pbf_path)
     
@@ -180,7 +234,7 @@ def process_state(state_key, config):
             return
 
     print(f"[{state_key}] Extracting addresses from PBF in chunks of {CHUNK_SIZE}...")
-    handler = AddressHandler()
+    handler = AddressHandler(state_key=state_key)
     
     try:
         am = osmium.area.AreaManager()

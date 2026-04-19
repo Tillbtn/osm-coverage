@@ -8,6 +8,9 @@ import tqdm
 import re 
 import numpy as np 
 from shapely.geometry import Point 
+import hashlib 
+import osmium
+from shapely import wkb
 
 # Configuration
 DATA_DIR = "data"
@@ -18,6 +21,9 @@ DIR_RLP = os.path.join(DATA_DIR, "rlp")
 DIR_BB = os.path.join(DATA_DIR, "bb")
 DIR_HH = os.path.join(DATA_DIR, "hh")
 DIR_HE = os.path.join(DATA_DIR, "he")
+DIR_ST = os.path.join(DATA_DIR, "st")
+DIR_SN = os.path.join(DATA_DIR, "sn")
+DIR_BE = os.path.join(DATA_DIR, "be")
 DIR_MV = os.path.join(DATA_DIR, "mv")
 
 def remove_ortsteil(text):
@@ -26,6 +32,18 @@ def remove_ortsteil(text):
     """
     if not isinstance(text, str): return text
     return re.sub(r',\s*Ortsteil\s+[^;]+', '', text, flags=re.IGNORECASE).strip()
+
+def generate_alkis_id(row):
+    """
+    Generates a unique ID for an ALKIS row based on its content and coordinates.
+    """
+    try:
+        geo_str = f"{row.geometry.x:.3f}_{row.geometry.y:.3f}" if row.geometry else "no_geo"
+    except:
+        geo_str = "invalid_geo"
+        
+    raw_str = f"{row.get('district', '')}_{row.get('street', '')}_{row.get('housenumber', '')}_{geo_str}"
+    return hashlib.md5(raw_str.encode('utf-8')).hexdigest()[:12]
 
 
 def split_alkis_address_string(original_street, original_hnr_string, extra_separators=None):
@@ -120,27 +138,32 @@ def expand_complex_addresses(df, extra_separators=None, desc="Splitting Addresse
     
     return df
 
-def clean_nrw_street_suffixes(df):
+def remove_short_suffixes(df):
     """
-    Removes 2-letter suffixes from street names found in some NRW datasets (e.g. "Frankenstr. Ju")
+    Removes 2-letter suffixes from street names.
+    Used for 'Köln' where suffixes like ' Ei', ' Au', ' Po' are common artifacts.
     """
     if 'street' not in df.columns: return df
     
-    # Check if we have any streets ending in Space + 2 letters
-    # Exclude common valid 2-letter endings like "Au" or "Aa", and Roman numerals
-    regex = r'\s+(?!(?:Au|Aa|Oy|Ut|II|IV|VI|IX|XI)$)[A-Za-zäöüßÄÖÜ]{2}$'
-    df['street'] = df['street'].astype(str).str.replace(regex, "", regex=True).str.strip()
+    regex = r'\s+[A-Za-zäöüßÄÖÜ]{2}$'
+
+    df['street'] = df['street'].astype(str).str.strip().str.replace(regex, "", regex=True).str.strip()
     return df
 
 def clean_nds_street_suffixes(df):
     """
     Removes suffixes starting with a comma followed by text (non-digits) from NDS data.
+    And removes '-xx-' suffixes from street names. #TODO: refactor
     """
     if 'street' not in df.columns: return df
     
     # Pattern: comma, optional whitespace, non-digits until end of string
-    regex = r',\s*[^0-9]+$'
-    df['street'] = df['street'].astype(str).str.replace(regex, "", regex=True).str.strip()
+    regex1 = r',\s*[^0-9]+$'
+    df['street'] = df['street'].astype(str).str.replace(regex1, "", regex=True).str.strip()
+    
+    # Pattern: '-xx-' suffix
+    regex2 = r'-[A-Za-zäöüßÄÖÜ]{2}-$'
+    df['street'] = df['street'].astype(str).str.replace(regex2, "", regex=True).str.strip()
     return df
 
 def normalize_columns(gdf):
@@ -246,6 +269,59 @@ def normalize_columns(gdf):
     return gdf[['street', 'housenumber', 'postcode', 'city', 'geometry']]
 
 
+class DistrictHandler(osmium.SimpleHandler):
+    def __init__(self, admin_levels=['10']):
+        super(DistrictHandler, self).__init__()
+        self.boundaries = []
+        self.wkbfab = osmium.geom.WKBFactory()
+        self.admin_levels = admin_levels
+
+    def area(self, a):
+        try:
+            if 'boundary' in a.tags and a.tags['boundary'] == 'administrative':
+                if a.tags.get('admin_level') in self.admin_levels:
+                    wkb_data = self.wkbfab.create_multipolygon(a)
+                    name = a.tags.get('name')
+                    level = a.tags.get('admin_level')
+                    if name:
+                        self.boundaries.append({'name': name, 'wkb': wkb_data, 'admin_level': level})
+        except:
+            pass
+
+def extract_osm_boundaries(pbf_path, admin_levels=['10']):
+    print(f"Extracting district boundaries from {pbf_path} (levels={admin_levels})...")
+    handler = DistrictHandler(admin_levels=admin_levels)
+    am = osmium.area.AreaManager()
+    
+    # 2-pass approach generally required for Relations -> Areas
+    try:
+        reader1 = osmium.io.Reader(pbf_path)
+        osmium.apply(reader1, am.first_pass_handler())
+        reader1.close()
+
+        reader2 = osmium.io.Reader(pbf_path)
+        # build geometries for node locations
+        idx = osmium.index.create_map("sparse_file_array")
+        lh = osmium.NodeLocationsForWays(idx)
+        lh.ignore_errors()
+        
+        osmium.apply(reader2, lh, handler, am.second_pass_handler(handler))
+        reader2.close()
+    except Exception as e:
+        print(f"[HH] Error reading OSM PBF: {e}")
+        return None
+    
+    if not handler.boundaries:
+        print("[HH] No boundaries found in OSM PBF.")
+        return None
+
+    df = pd.DataFrame(handler.boundaries)
+    df['geometry'] = df['wkb'].apply(lambda x: wkb.loads(x, hex=True))
+    gdf = gpd.GeoDataFrame(df, geometry='geometry', crs="EPSG:4326")
+    gdf = gdf.to_crs("EPSG:25832")
+    return gdf
+
+
 def process_state(state_name, state_dir, process_func):
     alkis_source_dir = os.path.join(state_dir, "alkis")
     output_file = os.path.join(state_dir, "alkis.parquet")
@@ -263,13 +339,18 @@ def process_state(state_name, state_dir, process_func):
         # Deduplicate
         full_gdf = full_gdf.drop_duplicates()
         
+        # Generate Unique IDs
+        print(f"[{state_name}] Generating ALKIS IDs...")
+        if 'alkis_id' not in full_gdf.columns:
+            full_gdf['alkis_id'] = full_gdf.apply(generate_alkis_id, axis=1)
+
         full_gdf.to_parquet(output_file)
         print(f"[{state_name}] Saved {len(full_gdf)} addresses to {output_file}")
     else:
         print(f"[{state_name}] No addresses found.")
 
-def process_lgln(directory):
-    # LGLN: Zips containing GPKGs
+def process_nds(directory):
+    # nds: Zips containing GPKGs
     results = []
     zips = glob.glob(os.path.join(directory, "*.zip"))
     for z in tqdm.tqdm(zips, desc="Extracting NDS Zips"):
@@ -365,14 +446,14 @@ def process_nrw(directory):
                         norm_gdf['district'] = district
                         norm_gdf['state'] = 'NRW'
                         
-                        # Apply NRW specific cleaning & Splitting
-                        norm_gdf = clean_nrw_street_suffixes(norm_gdf)
-                        
                         extra_seps = None
                         if district in ["Aachen Städteregion", "Aachen_Städteregion", "Aachen, Städteregion"]:
                              extra_seps = ['/']
                              
                         norm_gdf = expand_complex_addresses(norm_gdf, extra_separators=extra_seps)
+
+                        if "Köln" in district:
+                            norm_gdf = remove_short_suffixes(norm_gdf)
                         
                         results.append(norm_gdf)
                     else:
@@ -441,9 +522,18 @@ def process_rlp(directory):
         
         df['housenumber'] = df['hnr'] + df['adz'].fillna('')
         
+        # Identify municipality names that exist in multiple districts
+        collision_gmds = df.groupby('gmd')['kreis'].nunique()
+        collision_gmds = collision_gmds[collision_gmds > 1].index.tolist()
+        
+        # Selectively rename: only if name collision exists
+        df['district'] = df.apply(
+            lambda row: f"{row['gmd']} ({row['kreis']})" if row['gmd'] in collision_gmds else row['gmd'], 
+            axis=1
+        )
+        
         df = df.rename(columns={
             'str': 'street',
-            'gmd': 'district',
             'plz': 'postcode'
         })
         
@@ -480,12 +570,42 @@ def process_bb(directory):
     print(f"[BB] Reading GPKG from {gpkg_path}...")
     
     try:
-        gdf = gpd.read_file(gpkg_path, layer='adressen-bb', engine='pyogrio')
-        
+        try:
+            gdf = gpd.read_file(
+                gpkg_path, 
+                layer='adressen-bb', 
+                engine='pyogrio',
+                columns=['str', 'hnr', 'adz', 'postplz', 'gmd']
+            )
+        except Exception as e_cols:
+             print(f"[BB] Warning: Reading specific columns failed ({e_cols}), trying full read...")
+             gdf = gpd.read_file(gpkg_path, layer='adressen-bb', engine='pyogrio')
+
         gdf = gdf.dropna(subset=['str', 'hnr'])
         
         # Combine HNR + ADZ
-        gdf['housenumber'] = gdf['hnr'].astype(str) + gdf['adz'].fillna('').astype(str)
+        # Logic copied from brandenburg-addresses:
+        # 1. If adz starts with digit -> hnr + "/" + adz
+        # 2. If adz contains [pP][0-9]+ -> prepend "/" to the match (regex replace)
+        # 3. Else -> hnr + adz
+        
+        def format_bb_housenumber(row):
+            hnr = str(row['hnr'])
+            adz = str(row['adz']) if pd.notna(row['adz']) and row['adz'] != '' else ""
+            
+            if not adz:
+                return hnr
+                
+            # Check if starts with digit
+            if adz[0].isdigit():
+                return f"{hnr}/{adz}"
+                
+            # Check for P+Digit pattern (e.g. P1 -> /P1)            
+            adz_mod = re.sub(r'([pP][0-9]+)', r'/\1', adz)
+            
+            return f"{hnr}{adz_mod}"
+
+        gdf['housenumber'] = gdf.apply(format_bb_housenumber, axis=1)
         
         gdf = gdf.rename(columns={
             'str': 'street',
@@ -495,11 +615,14 @@ def process_bb(directory):
         
         gdf['city'] = gdf['district']
         
-        # Ensure geometry validity
-        gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty & gdf.geometry.is_valid]
+        # Check if geometry is present before using it
+        if 'geometry' in gdf.columns:
+            gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty & gdf.geometry.is_valid]
         
         cols = ['street', 'housenumber', 'postcode', 'city', 'district', 'geometry']
-        gdf = gdf[cols].copy()
+        # Filter if columns exist
+        final_cols = [c for c in cols if c in gdf.columns]
+        gdf = gdf[final_cols].copy()
         
         gdf['state'] = 'Brandenburg'
         
@@ -515,6 +638,7 @@ def process_hh(directory):
     
     # 1. Check for GML files directly
     gmls = glob.glob(os.path.join(directory, "*.gml"))
+    gmls += glob.glob(os.path.join(directory, "*.GML"))
     
     # 2. Check for ZIP
     if not gmls:
@@ -635,10 +759,12 @@ def process_hh(directory):
                              hnr_parts.append(node.text.strip())
                     
                     if hnr_parts:
-                        # Join parts. Usually "51" and "a" -> "51a".
-                        # Sometimes they might be duplicate? No, iter visits each node once.
-                        # Assuming order is document order: 51 then a.
-                        hnr_text = "".join(hnr_parts)
+                        hnr_text = hnr_parts[0]
+                        for part in hnr_parts[1:]:
+                            if part.lower().startswith("haus"):
+                                hnr_text += f", {part}"
+                            else:
+                                hnr_text += part
                     else:
                         hnr_text = None
                     
@@ -731,7 +857,40 @@ def process_hh(directory):
                 if x_sample < 180:
                     gdf.set_crs("EPSG:4258", inplace=True, allow_override=True)
                     gdf = gdf.to_crs("EPSG:25832")
+            
+            # Spatial Join with Districts
+            # Load OSM boundaries
+            pbf_path = os.path.join(directory, "osm", "hamburg-latest.osm.pbf")
+            if not os.path.exists(pbf_path):
+                 pbf_path = os.path.join(os.path.dirname(directory), "hh", "osm", "hamburg-latest.osm.pbf")
+            
+            districts_gdf = None
+            pbf_path = os.path.join(os.path.dirname(directory), "osm", "hamburg-latest.osm.pbf")
+            
+            if os.path.exists(pbf_path):
+                districts_gdf = extract_osm_boundaries(pbf_path)
                 
+            if districts_gdf is not None and not districts_gdf.empty:
+                print(f"[HH] Assigning districts using {len(districts_gdf)} polygons...")
+                # sjoin
+                # Ensure same CRS
+                if gdf.crs != districts_gdf.crs:
+                    districts_gdf = districts_gdf.to_crs(gdf.crs)
+                
+                joined = gpd.sjoin(gdf, districts_gdf[['geometry', 'name']], how='left', predicate='intersects')
+                
+                # Update district column
+                # If match found, use 'name' from index_right
+                joined['district'] = joined['name'].fillna('kein Stadtteil gefunden')
+                
+                # Cleanup sjoin columns
+                if 'index_right' in joined.columns: del joined['index_right']
+                if 'name' in joined.columns: del joined['name']
+                
+                gdf = joined
+            else:
+                 print("[HH] No district boundaries found for address")
+
             gdf['state'] = 'Hamburg'
             results.append(gdf)
             
@@ -795,6 +954,280 @@ def process_he(directory):
             
     return results
 
+def process_st(directory):
+    # ST Data: XML files in GBIS_Gebaeude subdir
+    # Format: GML/WFS FeatureCollection
+    # Feature: GebaeudeBauwerk
+    # Address field: lagebeztxt
+    
+    search_dir = os.path.join(directory, "GBIS_Gebaeude")
+    xmls = glob.glob(os.path.join(search_dir, "*.xml"))
+    
+    if not xmls:
+        # Fallback check root dir
+        xmls = glob.glob(os.path.join(directory, "*.xml"))
+        
+    if not xmls:
+        print(f"[ST] No XML files found in {search_dir} or {directory}")
+        return []
+
+    results = []
+    
+    for xml_path in tqdm.tqdm(xmls, desc="Processing ST XMLs"):
+        try:
+            try:
+                gdf = gpd.read_file(xml_path, engine='pyogrio')
+            except Exception as e:
+                layers = gpd.list_layers(xml_path)
+                if not layers.empty:
+                    layer = layers['name'][0]
+                    gdf = gpd.read_file(xml_path, layer=layer)
+                else:
+                    raise e
+                    
+            if gdf.empty: continue
+            
+            cols = gdf.columns.str.lower()
+            if 'lagebeztxt' in cols:
+                pass
+            
+            gdf = normalize_columns(gdf)
+            
+            if gdf is not None and not gdf.empty:
+                gdf['state'] = 'Sachsen-Anhalt'
+                
+                gdf = expand_complex_addresses(gdf)
+                
+                # Spatial Join with OSM Districts
+                if 'district' in gdf.columns: del gdf['district']
+                
+                pbf_path = os.path.join(os.path.dirname(directory), "osm", "sachsen-anhalt-latest.osm.pbf")
+                if os.path.exists(pbf_path):
+                     # Load Admin Level 8 (Gemeinden) and 6 (Kreisfreie Städte fallback)
+                     districts_gdf = extract_osm_boundaries(pbf_path, admin_levels=['6', '8'])
+                     
+                     if districts_gdf is not None and not districts_gdf.empty:
+                         if gdf.crs != districts_gdf.crs:
+                             districts_gdf = districts_gdf.to_crs(gdf.crs)
+
+                         joined = gpd.sjoin(gdf, districts_gdf[['geometry', 'name', 'admin_level']], how='left', predicate='intersects')
+                         
+                         def select_district(group):
+                             l8 = group[group['admin_level'] == '8']
+                             if not l8.empty:
+                                 return l8.iloc[0]['name']
+                             
+                             l6 = group[group['admin_level'] == '6']
+                             if not l6.empty:
+                                 return l6.iloc[0]['name']
+                                 
+                             return None
+
+                         joined['index_orig'] = joined.index
+                         joined_sorted = joined.sort_values(by='admin_level', ascending=False)
+                         joined_dedup = joined_sorted[~joined_sorted.index.duplicated(keep='first')]
+                         
+                         gdf['district'] = joined_dedup['name']
+                         gdf['district'] = gdf['district'].fillna('Unbekannt')
+                         
+                     else:
+                         gdf['district'] = 'ST'
+                else:
+                    gdf['district'] = 'ST'
+                
+                if 'city' not in gdf.columns or gdf['city'].isnull().all():
+                    gdf['city'] = gdf['district']
+                
+                results.append(gdf)
+                
+        except Exception as e:
+            print(f"[ST] Error processing {xml_path}: {e}")
+            pass
+            
+    return results
+
+
+def process_sn(directory):
+    csv_files = glob.glob(os.path.join(directory, "*.csv"))
+    if not csv_files:
+        csv_files = glob.glob(os.path.join(os.path.dirname(directory), "*.csv"))
+        
+    if not csv_files:
+        print(f"[SN] No CSV files found in {directory}.")
+        return []
+
+    results = []
+    
+    for csv_path in csv_files:
+        print(f"[SN] Processing {os.path.basename(csv_path)}...")
+        try:
+            df = pd.read_csv(csv_path, sep=';', dtype=str, encoding='utf-8', on_bad_lines='skip')
+            df.columns = df.columns.str.lower()
+            
+            required = ['str', 'hnr', 'ostwert', 'nordwert']
+            if not all(col in df.columns for col in required):
+                print(f"[SN] Missing columns in {csv_path}. Found: {df.columns.tolist()}")
+                continue
+
+            df = df.dropna(subset=required)
+            df = df[df['hnr'] != '0']
+            
+            def format_sn_housenumber(row):
+                hnr = str(row['hnr'])
+                adz = str(row['adz']) if pd.notna(row['adz']) and row['adz'] != '' else ""
+                
+                if not adz:
+                    return hnr
+                    
+                if adz[0].isdigit():
+                    return f"{hnr}/{adz}"
+                    
+                adz_mod = re.sub(r'([pP][0-9]+)', r'/\1', adz)
+                return f"{hnr}{adz_mod}"
+                
+            df['housenumber'] = df.apply(format_sn_housenumber, axis=1)
+            
+            rename_dict = {
+                'str': 'street',
+                'gmd': 'district',
+                'postplz': 'postcode'
+            }
+            
+            df = df.rename(columns=rename_dict)
+            if 'postcode' not in df.columns:
+                df['postcode'] = None
+            df['city'] = df['district']
+            
+            x = pd.to_numeric(df['ostwert'], errors='coerce')
+            y = pd.to_numeric(df['nordwert'], errors='coerce')
+            
+            gdf = gpd.GeoDataFrame(
+                df[['street', 'housenumber', 'postcode', 'city', 'district']],
+                geometry=gpd.points_from_xy(x, y),
+                crs="EPSG:25833"
+            )
+            
+            gdf = gdf.to_crs("EPSG:25832")
+            gdf = gdf[gdf.geometry.is_valid & ~gdf.geometry.is_empty]
+            gdf['state'] = 'Sachsen'
+            
+            results.append(gdf)
+            
+        except Exception as e:
+            print(f"[SN] Error processing {csv_path}: {e}")
+            
+    return results
+
+def process_be(directory):
+    search_dir = os.path.join(directory, "HKO_EPSG25833")
+    txt_files = glob.glob(os.path.join(search_dir, "adressen-*.txt"))
+    
+    if not txt_files:
+        print(f"[BE] No 'adressen-*.txt' files found in {search_dir}")
+        return []
+
+    results = []
+    
+    for txt_path in txt_files:
+        print(f"[BE] Processing {os.path.basename(txt_path)}...")
+        try:
+            # Semicolon separated, no header. 
+            # Indices: 10=Bezirk, 14=Street, 15=Hnr, 16=Adz, 18=X, 19=Y, 20=PLZ
+            df = pd.read_csv(txt_path, sep=';', header=None, dtype=str, encoding='utf-8', on_bad_lines='skip')
+            
+            # Select and rename columns
+            df = df[[10, 14, 15, 16, 18, 19, 20]].copy()
+            df.columns = ['district', 'street', 'hnr', 'adz', 'ostwert', 'nordwert', 'postcode']
+            
+            df = df.dropna(subset=['street', 'hnr', 'ostwert', 'nordwert'])
+            df = df[df['hnr'] != '0']
+            
+            # Combine HNR + ADZ
+            df['housenumber'] = df['hnr'] + df['adz'].fillna('').str.strip()
+            
+            df['city'] = 'Berlin'
+            df['state'] = 'Berlin'
+            
+            x = pd.to_numeric(df['ostwert'], errors='coerce')
+            y = pd.to_numeric(df['nordwert'], errors='coerce')
+            
+            gdf = gpd.GeoDataFrame(
+                df[['street', 'housenumber', 'postcode', 'city', 'district', 'state']],
+                geometry=gpd.points_from_xy(x, y),
+                crs="EPSG:25833"
+            )
+            
+            # Convert to EPSG:25832 for consistency with other states
+            gdf = gdf.to_crs("EPSG:25832")
+            
+            gdf = gdf[gdf.geometry.is_valid & ~gdf.geometry.is_empty]
+            
+            results.append(gdf)
+            
+        except Exception as e:
+            print(f"[BE] Error processing {txt_path}: {e}")
+            
+    return results
+
+
+def process_mv(directory):
+    # Expects zipped shapefiles in data/mv/alkis
+    
+    # 1. Extract Zips
+    zips = glob.glob(os.path.join(directory, "*.zip"))
+    for z in tqdm.tqdm(zips, desc="Extracting MV Zips"):
+        folder = os.path.splitext(z)[0]
+        if not os.path.exists(folder):
+            try:
+                with zipfile.ZipFile(z, 'r') as zf:
+                    zf.extractall(folder)
+            except Exception as e:
+                print(f"[MV] Error extracting {z}: {e}")
+                
+    # 2. Find and Process Shapefiles
+    results = []
+    shps = glob.glob(os.path.join(directory, "**", "*GebaeudeBauwerk.shp"), recursive=True)
+    
+    if not shps:
+        print(f"[MV] No *GebaeudeBauwerk.shp files found in {directory}")
+        return []
+        
+    for shp in tqdm.tqdm(shps, desc="Processing MV Shapefiles"):
+        try:
+            # Read shapefile
+            # Only need lagebeztxt and geometry
+            gdf = gpd.read_file(shp, engine='pyogrio')
+            
+            # Check for lagebeztxt
+            if 'lagebeztxt' not in gdf.columns:
+                print(f"[MV] 'lagebeztxt' not found in {os.path.basename(shp)}")
+                continue
+                
+            # Filter NULL
+            gdf = gdf[gdf['lagebeztxt'] != 'NULL']
+            
+            if gdf.empty:
+                continue
+
+
+            norm_gdf = normalize_columns(gdf)
+            
+            if norm_gdf is not None:
+                norm_gdf['state'] = 'MV'
+                norm_gdf['district'] = os.path.basename(os.path.dirname(shp))
+                
+                # Expand complex addresses (e.g. "Str 1, 2")
+                norm_gdf = expand_complex_addresses(norm_gdf)
+                
+                results.append(norm_gdf)
+            else:
+                print(f"[MV] Normalization failed for {os.path.basename(shp)} (Columns: {gdf.columns.tolist()})")
+
+                
+        except Exception as e:
+            print(f"[MV] Error processing {shp}: {e}")
+            
+    return results
 
 
 def process_mv(directory):
@@ -857,12 +1290,15 @@ def process_mv(directory):
     return results
 
 def main():
-    process_state("NDS", DIR_NDS, process_lgln)
+    process_state("NDS", DIR_NDS, process_nds)
     process_state("NRW", DIR_NRW, process_nrw)
     process_state("RLP", DIR_RLP, process_rlp)
     process_state("BB", DIR_BB, process_bb)
     process_state("HH", DIR_HH, process_hh)
     process_state("HE", DIR_HE, process_he)
+    process_state("ST", DIR_ST, process_st)
+    process_state("SN", DIR_SN, process_sn)
+    process_state("BE", DIR_BE, process_be)
     process_state("MV", DIR_MV, process_mv)
 
 if __name__ == "__main__":

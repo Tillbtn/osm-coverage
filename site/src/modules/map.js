@@ -18,7 +18,8 @@ export function createJOSMLink(lat, lng) {
     const container = document.createElement('div');
     const link = document.createElement('a');
     link.href = "#";
-    link.textContent = "in JOSM öffnen";
+    link.className = "popup-link";
+    link.textContent = "JOSM öffnen";
     link.onclick = (e) => {
         e.preventDefault();
         fetch(url).catch(err => {
@@ -26,6 +27,17 @@ export function createJOSMLink(lat, lng) {
             alert("JOSM nicht erreichbar");
         });
     };
+    container.appendChild(link);
+    return container;
+}
+
+export function createOSMLink(lat, lng, zoom = 18) {
+    const container = document.createElement('div');
+    const link = document.createElement('a');
+    link.href = `https://www.openstreetmap.org/#map=${zoom}/${lat}/${lng}`;
+    link.className = "popup-link";
+    link.target = "_blank";
+    link.textContent = "osm.org";
     container.appendChild(link);
     return container;
 }

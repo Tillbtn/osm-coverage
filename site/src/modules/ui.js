@@ -83,6 +83,8 @@ export function updateChart(districtName, historyData) {
     let dataset = [];
     if (districtName === "Global" || districtName === "global") {
         dataset = historyData.global || [];
+    } else if (historyData.states && historyData.states[districtName]) {
+        dataset = historyData.states[districtName];
     } else {
         dataset = (historyData.districts && historyData.districts[districtName]) ? historyData.districts[districtName] : [];
     }

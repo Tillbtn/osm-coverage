@@ -1,18 +1,24 @@
 # Python
 .venv
+scripts/__pycache__/
 
-# Data
-data/
-temp_alkis/
-site/districts/
-site/tiles/
-site/buildings/
-
+# Node
 site/node_modules/
 site/dist/
 
-*.json
-*.geojson
+# Data
+data/
+site/public/
+Server-Backup/
+backups/
+logs/
+public_data/
 
-!package.json
-!package-lock.json
+# Legacy
+scripts/old/
+site_old/
+deployment/old/
+
+# Testing
+testing/
+tests/

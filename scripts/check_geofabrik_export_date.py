@@ -5,7 +5,7 @@ import json
 import os
 import sys
 
-# Configuration matches 03_import_pbf_optimized.py
+# Configuration matches 03_import_osm.py
 STATES = {
     "nds": {
         "url": "https://download.geofabrik.de/europe/germany/niedersachsen.html",
