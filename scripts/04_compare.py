@@ -717,7 +717,13 @@ def main():
         if alkis.crs != "EPSG:4326":
             alkis = alkis.to_crs(epsg=4326)
         state_total = len(alkis)
-        state_missing = len(missing)
+        
+        # Identify Missing (global)
+        state_missing_df = alkis[~alkis['found_in_osm']]
+        if 'correction_type' in alkis.columns:
+            state_missing_df = state_missing_df[~state_missing_df['correction_type'].isin(['ignored', 'already_mapped'])]
+        state_missing = len(state_missing_df)
+        
         state_osm_count = len(osm)
         
         # Directories

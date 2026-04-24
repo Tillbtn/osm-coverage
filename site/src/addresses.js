@@ -443,6 +443,7 @@ const STATE_CONFIG = {
     bb: { center: [52.36, 13.0], zoom: 9, name: "Brandenburg" },
     be: { center: [52.52, 13.405], zoom: 11, name: "Berlin" },
     hh: { center: [53.55, 10.0], zoom: 11, name: "Hamburg" },
+    mv: { center: [53.87601, 12.81555], zoom: 9, name: "Mecklenburg-Vorpommern" },
     nds: { center: [52.9, 9.8], zoom: 9, name: "Niedersachsen" },
     nrw: { center: [51.4, 7.6], zoom: 9, name: "Nordrhein-Westfalen" },
     rlp: { center: [49.9, 7.3], zoom: 9, name: "Rheinland-Pfalz" },
