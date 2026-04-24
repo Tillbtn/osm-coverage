@@ -50,6 +50,10 @@ STATES = {
     "be": {
         "pbf_url": "https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf",
         "pbf_file": "berlin-latest.osm.pbf"
+    },
+    "mv": {
+        "pbf_url": "https://download.geofabrik.de/europe/germany/mecklenburg-vorpommern-latest.osm.pbf",
+        "pbf_file": "mecklenburg-vorpommern-latest.osm.pbf"
     }
 }
 

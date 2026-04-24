@@ -24,6 +24,7 @@ DIR_HE = os.path.join(DATA_DIR, "he")
 DIR_ST = os.path.join(DATA_DIR, "st")
 DIR_SN = os.path.join(DATA_DIR, "sn")
 DIR_BE = os.path.join(DATA_DIR, "be")
+DIR_MV = os.path.join(DATA_DIR, "mv")
 
 def remove_ortsteil(text):
     """
@@ -183,7 +184,7 @@ def normalize_columns(gdf):
     elif 'lagebezeichnung' in cols: street = gdf.columns[cols == 'lagebezeichnung'][0]
     elif 'bez' in cols: street = gdf.columns[cols == 'bez'][0]
     
-    # NRW Special Case: 'lagebeztxt' contains "Street 123b"
+    # Case: 'lagebeztxt' contains "Street 123b"
     if "lagebeztxt" in cols and street is None: 
         col_name = gdf.columns[cols == 'lagebeztxt'][0]
         
@@ -238,8 +239,11 @@ def normalize_columns(gdf):
     
     gdf = gdf.rename(columns=rename)
     
+    # Clean street names: remove "OT " prefix
+    gdf['street'] = gdf['street'].astype(str).str.replace(r'^OT\s+', '', regex=True)
+    
     # Filter out empty streets (NaN or whitespace only)
-    gdf = gdf[gdf['street'].notna() & (gdf['street'].astype(str).str.strip() != "")]
+    gdf = gdf[gdf['street'].notna() & (gdf['street'].astype(str).str.strip().str.lower() != "nan") & (gdf['street'].astype(str).str.strip() != "")]
     
     # Add missing
     if 'city' not in gdf.columns: gdf['city'] = None
@@ -1168,16 +1172,116 @@ def process_be(directory):
             
     return results
 
+
+def process_mv(directory):
+    # Expects zipped shapefiles in data/mv/alkis
+    
+    csv_path = os.path.join(os.path.dirname(directory), "Gemeinde_Gemarkung_Kreis.csv")
+    mapping = {} # id_Gemeinde -> (Name, Kreis)
+    all_names = {} # Name -> list of (id, Kreis)
+    
+    if os.path.exists(csv_path):
+        try:
+            df_map = pd.read_csv(csv_path, sep=';', dtype=str)
+            for _, row in df_map.iterrows():
+                id_g = row['id_Gemeinde']
+                name = row['Gemeinde_Name']
+                kreis = row['Kreis_Name']
+                mapping[id_g] = (name, kreis)
+                if name not in all_names:
+                    all_names[name] = set()
+                all_names[name].add(id_g)
+        except Exception as e:
+            print(f"[MV] Error loading mapping CSV: {e}")
+
+    # Determine which names are duplicates across different IDs
+    duplicate_names = {name for name, ids in all_names.items() if len(ids) > 1}
+
+    zips = glob.glob(os.path.join(directory, "*.zip"))
+    for z in tqdm.tqdm(zips, desc="Extracting MV Zips"):
+        folder = os.path.splitext(z)[0]
+        if not os.path.exists(folder):
+            try:
+                with zipfile.ZipFile(z, 'r') as zf:
+                    zf.extractall(folder)
+            except Exception as e:
+                print(f"[MV] Error extracting {z}: {e}")
+                
+    results = []
+    shps = glob.glob(os.path.join(directory, "**", "*GebaeudeBauwerk.shp"), recursive=True)
+    
+    if not shps:
+        print(f"[MV] No *GebaeudeBauwerk.shp files found in {directory}")
+        return []
+        
+    for shp in tqdm.tqdm(shps, desc="Processing MV Shapefiles"):
+        try:
+            # Extract id_Gemeinde from folder name (prefix of the folder basename)
+            folder_name = os.path.basename(os.path.dirname(shp))
+            id_match = re.match(r'^(\d{8})_', folder_name)
+            
+            district_name = folder_name
+            if id_match:
+                id_g = id_match.group(1)
+                if id_g in mapping:
+                    m_name, m_kreis = mapping[id_g]
+                    if m_name in duplicate_names:
+                        district_name = f"{m_name} ({m_kreis})"
+                    else:
+                        district_name = m_name
+
+            gdf = gpd.read_file(shp, engine='pyogrio')
+            
+            if 'lagebeztxt' not in gdf.columns:
+                print(f"[MV] 'lagebeztxt' not found in {os.path.basename(shp)}")
+                continue
+                
+            gdf = gdf[gdf['lagebeztxt'] != 'NULL']
+            
+            if gdf.empty:
+                continue
+
+            norm_gdf = normalize_columns(gdf)
+            
+            if norm_gdf is not None:
+                norm_gdf['state'] = 'MV'
+                norm_gdf['district'] = district_name
+                
+                norm_gdf = expand_complex_addresses(norm_gdf)
+                
+                results.append(norm_gdf)
+            else:
+                print(f"[MV] Normalization failed for {os.path.basename(shp)} (Columns: {gdf.columns.tolist()})")
+
+                
+        except Exception as e:
+            print(f"[MV] Error processing {shp}: {e}")
+            
+    return results
+
 def main():
-    process_state("NDS", DIR_NDS, process_nds)
-    process_state("NRW", DIR_NRW, process_nrw)
-    process_state("RLP", DIR_RLP, process_rlp)
-    process_state("BB", DIR_BB, process_bb)
-    process_state("HH", DIR_HH, process_hh)
-    process_state("HE", DIR_HE, process_he)
-    process_state("ST", DIR_ST, process_st)
-    process_state("SN", DIR_SN, process_sn)
-    process_state("BE", DIR_BE, process_be)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--state", type=str, help="State to process (e.g., NDS)")
+    args = parser.parse_args()
+
+    states_to_process = [
+        ("NDS", DIR_NDS, process_nds),
+        ("NRW", DIR_NRW, process_nrw),
+        ("RLP", DIR_RLP, process_rlp),
+        ("BB", DIR_BB, process_bb),
+        ("HH", DIR_HH, process_hh),
+        ("HE", DIR_HE, process_he),
+        ("ST", DIR_ST, process_st),
+        ("SN", DIR_SN, process_sn),
+        ("BE", DIR_BE, process_be),
+        ("MV", DIR_MV, process_mv),
+    ]
+
+    for state_name, state_dir, process_func in states_to_process:
+        if args.state and args.state.upper() != state_name.upper():
+            continue
+        process_state(state_name, state_dir, process_func)
 
 if __name__ == "__main__":
     main()

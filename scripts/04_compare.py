@@ -45,7 +45,8 @@ STATES = {
     "he": { "pbf_file": "hessen-latest.osm.pbf" },
     "st": { "pbf_file": "sachsen-anhalt-latest.osm.pbf" },
     "sn": { "pbf_file": "sachsen-latest.osm.pbf" },
-    "be": { "pbf_file": "berlin-latest.osm.pbf" }
+    "be": { "pbf_file": "berlin-latest.osm.pbf" },
+    "mv": { "pbf_file": "mecklenburg-vorpommern-latest.osm.pbf" }
 }
 
 
@@ -479,7 +480,7 @@ def expand_address_ranges(df):
     return df
 
 def main():
-    STATES_LIST = ["nds", "nrw", "rlp", "bb", "hh", "he", "st", "sn", "be"]
+    STATES_LIST = ["nds", "nrw", "rlp", "bb", "hh", "he", "st", "sn", "be", "mv"]
     
     ENABLE_FLEXIBLE_PARSING = True
     
@@ -716,7 +717,13 @@ def main():
         if alkis.crs != "EPSG:4326":
             alkis = alkis.to_crs(epsg=4326)
         state_total = len(alkis)
-        state_missing = len(missing)
+        
+        # Identify Missing (global)
+        state_missing_df = alkis[~alkis['found_in_osm']]
+        if 'correction_type' in alkis.columns:
+            state_missing_df = state_missing_df[~state_missing_df['correction_type'].isin(['ignored', 'already_mapped'])]
+        state_missing = len(state_missing_df)
+        
         state_osm_count = len(osm)
         
         # Directories

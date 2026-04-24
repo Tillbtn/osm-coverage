@@ -105,13 +105,18 @@ CONFIG = {
         "input": "data/be/osm/berlin-latest.osm.pbf",
         "admin_levels": ['9'],
         "tolerance": 0.0005,
+    },
+    "mv": {
+        "type": "file",
+        "input": "data/boundaries/mv/dvg_gemeinden/gemeinden.shp", # https://www.geoportal-mv.de/portal/Geowebdienste/INSPIRE_Atom_Feeds?feed=https%3A%2F%2Fwww.geodaten-mv.de%2Fdienste%2Fdvg_atom#feed=https%3A%2F%2Fwww.geodaten-mv.de%2Fdienste%2Fdvg_atom%3Ftype%3Ddataset%26id%3D1c42f9ff-e3d4-44f7-89d5-83d26a3ec45d
+        "tolerance": 0.001,
     }
 }
 
 def resolve_name_col(gdf, specified_col=None):
     if specified_col and specified_col in gdf.columns:
         return specified_col
-    candidates = ["GEN", "GEMEINDE", "GN", "KRS_NAME", "NAM", "NAME", "LANDKREIS", "GEM_NAME", "GMDE_BZ", "text", "ORTSNAME"]
+    candidates = ["GEN", "GEMEINDE", "GN", "KRS_NAME", "NAM", "NAME", "LANDKREIS", "GEM_NAME", "GMDE_BZ", "text", "ORTSNAME", "gen", "name"]
     for c in candidates:
         if c in gdf.columns:
             return c
@@ -234,6 +239,45 @@ def process_state(state, cfg):
                     return name
                     
                 gdf['GEN'] = gdf['GEN'].apply(map_sn)
+                
+        elif state == 'mv':
+            csv_path = "data/mv/Gemeinde_Gemarkung_Kreis.csv"
+            if os.path.exists(csv_path):
+                try:
+                    df_map = pd.read_csv(csv_path, sep=';', dtype=str)
+                    mapping = {} # id_8 -> (Name, Kreis)
+                    all_names = {} # Name -> set of id_8
+                    for _, row in df_map.iterrows():
+                        id_g = row['id_Gemeinde']
+                        name = row['Gemeinde_Name']
+                        kreis = row['Kreis_Name']
+                        mapping[id_g] = (name, kreis)
+                        if name not in all_names:
+                            all_names[name] = set()
+                        all_names[name].add(id_g)
+                    
+                    duplicate_names = {name for name, ids in all_names.items() if len(ids) > 1}
+                    
+                    def map_mv(row):
+                        rs = str(row.get('rs', ''))
+                        if len(rs) >= 12:
+                            # rs example: 130715151008
+                            # id_g example: 13071008
+                            # Logic: rs[0:2] (State) + rs[2:3] (RegBez) + rs[3:5] (Kreis) + rs[9:12] (Gemeinde)
+                            id_g = rs[0:2] + rs[2:3] + rs[3:5] + rs[9:12]
+                            if id_g in mapping:
+                                m_name, m_kreis = mapping[id_g]
+                                if m_name in duplicate_names:
+                                    return f"{m_name} ({m_kreis})"
+                                return m_name
+                        
+                        # Fallback: if GEN is already there, use it
+                        return row.get('GEN', row.get('gen', ''))
+                    
+                    if 'rs' in gdf.columns:
+                        gdf['GEN'] = gdf.apply(map_mv, axis=1)
+                except Exception as e:
+                    print(f"[MV] Error loading mapping CSV: {e}")
 
     # Convert to 4326 if needed
     if "force_crs" in cfg:
@@ -383,7 +427,7 @@ def process_germany_boundary():
 
     # only the states that are in the comparison
     selected_states = [
-        "Berlin", "Brandenburg", "Hamburg", "Hessen", "Niedersachsen", "Nordrhein-Westfalen", 
+        "Berlin", "Brandenburg", "Hamburg", "Hessen", "Mecklenburg-Vorpommern", "Niedersachsen", "Nordrhein-Westfalen", 
         "Rheinland-Pfalz", "Sachsen", "Sachsen-Anhalt"
     ]
     
