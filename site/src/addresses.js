@@ -78,6 +78,17 @@ try {
     console.warn("Could not load Legend state", e);
 }
 
+function shouldHideFeature(feature) {
+    const props = feature.properties;
+    if (props && isValid(props.correction_comment)) {
+        const comment = props.correction_comment.toLowerCase();
+        if (comment.includes('abkürzung') || comment.includes('abgekürzt')) {
+            return true;
+        }
+    }
+    return false;
+}
+
 function loadDistrict(name, preserveView = false) {
     if (currentLayer) map.removeLayer(currentLayer);
     currentLayer = null;
@@ -174,6 +185,8 @@ function loadDistrict(name, preserveView = false) {
             currentLayer = L.geoJSON(data, {
                 filter: function (feature) {
                     const props = feature.properties;
+                    if (props.matched && shouldHideFeature(feature)) return false;
+
                     let cat = 'missing';
 
                     if (props && isValid(props.correction_type)) {
