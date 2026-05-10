@@ -489,6 +489,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Compare ALKIS and OSM data.")
     parser.add_argument("--adjust-history", action="store_true", help="Adjust historical statistics based on the delta from the current run.")
+    parser.add_argument("--force", action="store_true", help="Force comparison even if up-to-date.")
     args = parser.parse_args()
     
     today = datetime.date.today().isoformat()
@@ -498,6 +499,10 @@ def main():
     for state in STATES_LIST:
         alkis_path = os.path.join(DATA_DIR, state, "alkis.parquet")
         osm_path = os.path.join(DATA_DIR, state, "osm.parquet")
+        corrections_file = os.path.join(SITE_DIR, state, f"{state}_alkis_corrections.json")
+        history_file = os.path.join(SITE_DIR, state, f"{state}_history.json")
+        
+        pbf_path = os.path.join(DATA_DIR, state, "osm", STATES[state]["pbf_file"])
         
         if not os.path.exists(alkis_path):
             print(f"[{state}] ALKIS file not found: {alkis_path}. Skipping.")
@@ -505,6 +510,27 @@ def main():
         if not os.path.exists(osm_path):
             print(f"[{state}] OSM file not found: {osm_path}. Skipping.")
             continue
+            
+        # Optimization: Compare PBF timestamp with the latest history entry
+        if not args.force and os.path.exists(history_file) and os.path.exists(pbf_path):
+            try:
+                reader = osmium.io.Reader(pbf_path)
+                header_ts = reader.header().get("osmosis_replication_timestamp")
+                reader.close()
+                
+                if header_ts:
+                    pbf_date_str = str(header_ts)
+                    with open(history_file, 'r') as f:
+                        history_store = json.load(f)
+                    
+                    if "global" in history_store and history_store["global"]:
+                        latest_history_date = history_store["global"][-1].get("date")
+                        if latest_history_date == pbf_date_str:
+                            print(f"[{state}] PBF timestamp ({pbf_date_str}) matches latest history. Skipping comparison.")
+                            found_any = True
+                            continue
+            except Exception as e:
+                print(f"[{state}] Error checking PBF timestamp for optimization: {e}")
             
         found_any = True
         print(f"[{state}] Loading data...")
@@ -516,7 +542,6 @@ def main():
            continue
 
         # Apply Generic Corrections
-        corrections_file = os.path.join(SITE_DIR, state, f"{state}_alkis_corrections.json")
         alkis = apply_corrections(alkis, corrections_file, state)
 
         # Apply KGV Filter (Brandenburg specific)
