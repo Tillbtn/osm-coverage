@@ -7,17 +7,20 @@ mkdir -p site/public/districts
 mkdir -p site/public/states
 mkdir -p site/public/tiles
 
+echo "Starting Update Log..." > site/public/update.log
+exec > >(awk '{ print strftime("[%Y-%m-%d %H:%M:%S]"), $0; fflush() }' | tee -a site/public/update.log) 2>&1
+
 echo "Starting Update Loop..."
 
 while true; do
-    echo "[$(date)] Checking for new data..."
+    echo "Checking for new data..."
     
     # Check if update is needed
     python scripts/check_geofabrik_export_date.py
     CHECK_STATUS=$?
 
     if [ $CHECK_STATUS -eq 0 ]; then
-        echo "[$(date)] New data found/Update required. Starting update process..."
+        echo "New data found/Update required. Starting update process..."
 
         # # 1. Download ALKIS (Optional - might fail if endpoint changes/unavailable)
         # echo "Running 01_download_alkis_nds.py..."
@@ -50,10 +53,10 @@ while true; do
              cp "$f" "backups/${state_name}_history_$(date +%F).json"
         done
 
-        echo "[$(date)] Update complete. Exiting successfully."
+        echo "Update complete. Exiting successfully."
         exit 0
     else
-        echo "[$(date)] No new data available. Retrying in 1 hour..."
+        echo "No new data available. Retrying in 1 hour..."
         sleep 3600
     fi
 done

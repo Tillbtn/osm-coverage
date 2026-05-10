@@ -10,6 +10,7 @@ export default defineConfig({
         rollupOptions: {
             input: {
                 main: 'addresses.html',
+                status: 'status.html'
             },
         },
     },

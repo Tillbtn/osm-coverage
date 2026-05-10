@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Status - OSM-ALKIS</title>
+    <link rel="stylesheet" href="/src/style.css">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Fira+Code:wght@400;500&display=swap"
+        rel="stylesheet">
+    <style>
+        .terminal-container {
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            font-family: 'Fira Code', monospace;
+            padding: 20px;
+            border-radius: 8px;
+            height: 60vh;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
+            font-size: 14px;
+            line-height: 1.5;
+            margin-top: 20px;
+        }
+
+        .header-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 20px;
+        }
+
+        .btn-refresh {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .btn-refresh:hover {
+            background: #2563eb;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: #10b981;
+            margin-right: 8px;
+        }
+
+        .status-indicator.offline {
+            background-color: #ef4444;
+        }
+    </style>
+</head>
+
+<body class="landing-page">
+    <div class="landing-container" style="max-width: 1000px;">
+        <header class="landing-header" style="text-align: left; padding-bottom: 0;">
+            <h1>System Status (Worker)</h1>
+            <p>Live-Ausgabe des Update-Skripts <code>run_updates.sh</code></p>
+        </header>
+
+        <div class="header-actions">
+            <div>
+                <span class="status-indicator" id="connection-status"></span>
+                <span id="connection-text">Verbunden (Auto-Refresh alle 5s)</span>
+            </div>
+            <button class="btn-refresh" id="refresh-btn">Manuell aktualisieren</button>
+        </div>
+
+        <div class="terminal-container" id="terminal-output">Lade Logs...</div>
+    </div>
+    <script type="module" src="/src/status.js"></script>
+</body>
+
+</html>
