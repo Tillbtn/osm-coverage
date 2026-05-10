@@ -44,4 +44,5 @@ services:
       - ../backups:/app/backups
     environment:
       - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
     restart: "no"
