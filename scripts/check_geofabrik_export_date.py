@@ -18,6 +18,34 @@ STATES = {
     "rlp": {
         "url": "https://download.geofabrik.de/europe/germany/rheinland-pfalz.html",
         "history_file": os.path.join("site", "public", "states", "rlp", "rlp_history.json")
+    },
+    "bb": {
+        "url": "https://download.geofabrik.de/europe/germany/brandenburg.html",
+        "history_file": os.path.join("site", "public", "states", "bb", "bb_history.json")
+    },
+    "hh": {
+        "url": "https://download.geofabrik.de/europe/germany/hamburg.html",
+        "history_file": os.path.join("site", "public", "states", "hh", "hh_history.json")
+    },
+    "he": {
+        "url": "https://download.geofabrik.de/europe/germany/hessen.html",
+        "history_file": os.path.join("site", "public", "states", "he", "he_history.json")
+    },
+    "st": {
+        "url": "https://download.geofabrik.de/europe/germany/sachsen-anhalt.html",
+        "history_file": os.path.join("site", "public", "states", "st", "st_history.json")
+    },
+    "sn": {
+        "url": "https://download.geofabrik.de/europe/germany/sachsen.html",
+        "history_file": os.path.join("site", "public", "states", "sn", "sn_history.json")
+    },
+    "be": {
+        "url": "https://download.geofabrik.de/europe/germany/berlin.html",
+        "history_file": os.path.join("site", "public", "states", "be", "be_history.json")
+    },
+    "mv": {
+        "url": "https://download.geofabrik.de/europe/germany/mecklenburg-vorpommern.html",
+        "history_file": os.path.join("site", "public", "states", "mv", "mv_history.json")
     }
 }
 

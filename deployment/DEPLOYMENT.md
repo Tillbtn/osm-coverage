@@ -1,21 +1,14 @@
-# Deployment Guide (Git)
+# Deployment Guide
 
-This guide explains how to deploy the OSM Coverage Site using Git.
+This guide explains how to deploy the OSM Coverage Site on a Proxmox LXC.
 
 ## Prerequisites
 - **Server**: Proxmox LXC (Debian/Ubuntu).
-- **Resources**: 4GB+ RAM, 20GB+ Disk.
-- **Git** installed on server.
+- **Resources**: 7.5GB+ RAM, 24GB+ Disk.
 - **Docker** & **Docker Compose** installed.
 
 ## 1. Setup
-SSH into your server and clone the repository:
-
-```bash
-cd /opt
-git clone <YOUR_REPO_URL> osm-coverage
-cd osm-coverage
-```
+Clone the repository
 
 ## 2. Deploy
 Run Docker Compose pointing to the file in `deployment/`:
@@ -30,11 +23,17 @@ docker compose -f deployment/docker-compose.yml up -d --build
 - **Logs**: `logs/` folder in the repo root.
 - **Backups**: `backups/` folder in the repo root.
 
-## 3. Updates
-To update the site with new code:
+## 3. Set up cronjob for updates
+
+Add the following line to your crontab:
 
 ```bash
-cd /opt/osm-coverage
-git pull
+0 * * * * cd /opt/osm-coverage/deployment && docker compose run --rm worker
+```
+
+## 4. Update
+To update the site with the latest updates:
+
+```bash
 docker compose -f deployment/docker-compose.yml up -d --build
 ```
