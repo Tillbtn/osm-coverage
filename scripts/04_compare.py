@@ -776,7 +776,6 @@ def main():
         pbf_path = os.path.join("data", state, "osm", STATES[state]["pbf_file"])
         export_date = today 
         try:
-             import osmium
              reader = osmium.io.Reader(pbf_path)
              header_ts = reader.header().get("osmosis_replication_timestamp")
              reader.close()
