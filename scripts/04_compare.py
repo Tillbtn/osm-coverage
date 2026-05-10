@@ -638,7 +638,7 @@ def main():
         
         # Chunked Matching
         CHUNK_SIZE = 50000
-        for i in tqdm.tqdm(range(0, len(alkis), CHUNK_SIZE), desc=f"[{state}] Matching", ascii=True):
+        for i in tqdm.tqdm(range(0, len(alkis), CHUNK_SIZE), desc=f"[{state}] Matching", ascii=True, disable=not sys.stdout.isatty()):
             chunk = alkis.iloc[i : i + CHUNK_SIZE].copy()
             relevant_keys = chunk['key'].unique()
             osm_subset = osm[osm['key'].isin(relevant_keys)]
@@ -764,7 +764,7 @@ def main():
         
         district_list = []
         
-        for district in tqdm.tqdm(districts, desc=f"[{state}] Processing Districts", ascii=True):
+        for district in tqdm.tqdm(districts, desc=f"[{state}] Processing Districts", ascii=True, disable=not sys.stdout.isatty()):
             district_alkis = alkis[alkis['district'] == district]
             # Exclude ignored and already_mapped addresses from missing
             district_missing = district_alkis[~district_alkis['found_in_osm']]

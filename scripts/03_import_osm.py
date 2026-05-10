@@ -67,7 +67,7 @@ class AddressHandler(osmium.SimpleHandler):
         self.buffer = []
         self.chunks = []
         self.wkbfab = osmium.geom.WKBFactory()
-        self.pbar = tqdm.tqdm(desc=f"Proc {state_key}", unit=" obj", position=0, leave=True)
+        self.pbar = tqdm.tqdm(desc=f"Proc {state_key}", unit=" obj", position=0, leave=True, disable=not sys.stdout.isatty())
         self.total_addresses = 0
 
     def process_object(self, obj, geom_func):
@@ -183,7 +183,7 @@ def download_pbf(url, local_path):
         r.raise_for_status()
         total_size = int(r.headers.get('content-length', 0))
         block_size = 8192
-        with open(local_path, 'wb') as f, tqdm.tqdm(total=total_size, unit='iB', unit_scale=True, desc=f"DL {url.split('/')[-1]}", position=1, leave=False) as t:
+        with open(local_path, 'wb') as f, tqdm.tqdm(total=total_size, unit='iB', unit_scale=True, desc=f"DL {url.split('/')[-1]}", position=1, leave=False, disable=not sys.stdout.isatty()) as t:
             for chunk in r.iter_content(chunk_size=block_size):
                 t.update(len(chunk))
                 f.write(chunk)
