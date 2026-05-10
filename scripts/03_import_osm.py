@@ -67,7 +67,7 @@ class AddressHandler(osmium.SimpleHandler):
         self.buffer = []
         self.chunks = []
         self.wkbfab = osmium.geom.WKBFactory()
-        self.pbar = tqdm.tqdm(desc="Processing objects", unit=" obj")
+        self.pbar = tqdm.tqdm(desc=f"Proc {state_key}", unit=" obj", position=0, leave=True)
         self.total_addresses = 0
 
     def process_object(self, obj, geom_func):
@@ -159,7 +159,7 @@ def download_pbf(url, local_path):
     #     "Pragma": "no-cache"
     # }
     try:
-        head_response = requests.head(url)
+        head_response = requests.head(url, allow_redirects=True, timeout=30)
         # head_response = requests.head(url, allow_redirects=True, headers=headers, timeout=30)
         head_response.raise_for_status()
         last_modified = head_response.headers.get("Last-Modified")
@@ -178,12 +178,12 @@ def download_pbf(url, local_path):
         print(f"Warning: Could not check timestamp: {e}. Proceeding with download attempt.")
 
     print(f"Downloading {url} to {local_path}...")
-    with requests.get(url, stream=True) as r:
+    with requests.get(url, stream=True, timeout=30) as r:
     # with requests.get(url, stream=True, headers=headers, timeout=30) as r:
         r.raise_for_status()
         total_size = int(r.headers.get('content-length', 0))
         block_size = 8192
-        with open(local_path, 'wb') as f, tqdm.tqdm(total=total_size, unit='iB', unit_scale=True) as t:
+        with open(local_path, 'wb') as f, tqdm.tqdm(total=total_size, unit='iB', unit_scale=True, desc=f"DL {url.split('/')[-1]}", position=1, leave=False) as t:
             for chunk in r.iter_content(chunk_size=block_size):
                 t.update(len(chunk))
                 f.write(chunk)
