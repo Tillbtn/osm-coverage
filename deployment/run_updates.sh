@@ -8,7 +8,7 @@ mkdir -p site/public/states
 mkdir -p site/public/tiles
 
 echo "Starting Update Log..." > site/public/update.log
-exec > >(awk '{ print strftime("[%Y-%m-%d %H:%M:%S]"), $0; fflush() }' | tee -a site/public/update.log) 2>&1
+exec > >(while IFS= read -r line || [ -n "$line" ]; do echo "[$(date '+%Y-%m-%d %H:%M:%S')] $line"; done | tee -a site/public/update.log) 2>&1
 
 echo "Starting Update Check..."
 
