@@ -1036,6 +1036,8 @@ def main():
         with open(districts_file, 'w') as f:
             json.dump(district_list, f, indent=2)
 
+        print(f"Successfully processed {state}!")
+
     if not found_any:
         print("No data processed.")
     else:

@@ -3,14 +3,27 @@
 # Ensure output directories exist
 mkdir -p data
 # site/public structure
-mkdir -p site/public/districts
 mkdir -p site/public/states
-mkdir -p site/public/tiles
+# mkdir -p site/public/tiles
 
-echo "Starting Update Log..." > site/public/update.log
+LOG_FILE="site/public/update.log"
+if [ -f "$LOG_FILE" ]; then
+    THRESHOLD=$(date -d "48 hours ago" '+[%Y-%m-%d %H:%M:%S]')
+    awk -v thresh="$THRESHOLD" '
+        /^\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\]/ {
+            timestamp = $1 " " $2
+            if (timestamp >= thresh) print $0
+        }
+        !/^\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\]/ {
+            if (timestamp >= thresh || timestamp == "") print $0
+        }
+    ' "$LOG_FILE" > "${LOG_FILE}.tmp"
+    mv "${LOG_FILE}.tmp" "$LOG_FILE"
+fi
+
 exec > >(while IFS= read -r line || [ -n "$line" ]; do echo "[$(date '+%Y-%m-%d %H:%M:%S')] $line"; done | tee -a site/public/update.log) 2>&1
 
-echo "Starting Update Check..."
+echo "----------------------------------------"
 
 echo "Checking for new data..."
 
