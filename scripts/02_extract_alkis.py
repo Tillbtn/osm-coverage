@@ -1069,25 +1069,25 @@ def process_st(directory):
 
 
 def process_sn(directory):
-    csv_files = glob.glob(os.path.join(directory, "*.csv"))
-    if not csv_files:
-        csv_files = glob.glob(os.path.join(os.path.dirname(directory), "*.csv"))
+    data_files = glob.glob(os.path.join(directory, "*.csv")) + glob.glob(os.path.join(directory, "*.txt"))
+    if not data_files:
+        data_files = glob.glob(os.path.join(os.path.dirname(directory), "*.csv")) + glob.glob(os.path.join(os.path.dirname(directory), "*.txt"))
         
-    if not csv_files:
-        print(f"[SN] No CSV files found in {directory}.")
+    if not data_files:
+        print(f"[SN] No CSV or TXT files found in {directory}.")
         return []
 
     results = []
     
-    for csv_path in csv_files:
-        print(f"[SN] Processing {os.path.basename(csv_path)}...")
+    for file_path in data_files:
+        print(f"[SN] Processing {os.path.basename(file_path)}...")
         try:
-            df = pd.read_csv(csv_path, sep=';', dtype=str, encoding='utf-8', on_bad_lines='skip')
+            df = pd.read_csv(file_path, sep=';', dtype=str, encoding='utf-8', on_bad_lines='skip')
             df.columns = df.columns.str.lower()
             
             required = ['str', 'hnr', 'ostwert', 'nordwert']
             if not all(col in df.columns for col in required):
-                print(f"[SN] Missing columns in {csv_path}. Found: {df.columns.tolist()}")
+                print(f"[SN] Missing columns in {file_path}. Found: {df.columns.tolist()}")
                 continue
 
             df = df.dropna(subset=required)
@@ -1135,7 +1135,7 @@ def process_sn(directory):
             results.append(gdf)
             
         except Exception as e:
-            print(f"[SN] Error processing {csv_path}: {e}")
+            print(f"[SN] Error processing {file_path}: {e}")
             
     return results
 
