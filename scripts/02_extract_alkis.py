@@ -347,8 +347,26 @@ def process_state(state_name, state_dir, process_func):
         if 'alkis_id' not in full_gdf.columns:
             full_gdf['alkis_id'] = full_gdf.apply(generate_alkis_id, axis=1)
 
+        old_count = None
+        if os.path.exists(output_file):
+            try:
+                import pyarrow.parquet as pq
+                old_count = pq.read_metadata(output_file).num_rows
+            except Exception:
+                try:
+                    old_count = len(pd.read_parquet(output_file))
+                except Exception:
+                    pass
+
         full_gdf.to_parquet(output_file)
-        print(f"[{state_name}] Saved {len(full_gdf)} addresses to {output_file}")
+        
+        new_count = len(full_gdf)
+        if old_count is not None:
+            diff = new_count - old_count
+            diff_str = f"+{diff}" if diff >= 0 else f"{diff}"
+            print(f"[{state_name}] Saved {new_count} addresses to {output_file} (previously {old_count}, diff: {diff_str})")
+        else:
+            print(f"[{state_name}] Saved {new_count} addresses to {output_file}")
     else:
         print(f"[{state_name}] No addresses found.")
 
