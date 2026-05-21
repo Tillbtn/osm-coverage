@@ -939,7 +939,17 @@ def process_he(directory):
         print(f"[HE] Processing {os.path.basename(txt_path)}...")
         try:
              # Columns: nba;oid;qua;landschl;land;regbezschl;regbez;kreisschl;kreis;gmdschl;gmd;ottschl;ott;strschl;str;hnr;adz;zone;ostwert;nordwert
-             df = pd.read_csv(txt_path, sep=';', dtype=str, encoding='utf-8', on_bad_lines='skip')
+             df = None
+             for enc in ['utf-8', 'latin1', 'cp1252']:
+                 try:
+                     df = pd.read_csv(txt_path, sep=';', dtype=str, encoding=enc, on_bad_lines='skip')
+                     break
+                 except UnicodeDecodeError:
+                     continue
+             
+             if df is None:
+                 print(f"[HE] Failed to read {txt_path} with known encodings.")
+                 continue
              
              df.columns = df.columns.str.lower()
              
