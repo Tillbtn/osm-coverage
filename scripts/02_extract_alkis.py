@@ -437,13 +437,22 @@ def process_nrw(directory):
             base = os.path.basename(gpath)
             parts = base.split('_')
             
-            # parts structure: gru, vereinf, ID, NamePart1, NamePart2..., EPSG..., GeoPackage.gpkg
-            # Name starts at index 3. Ends before the part starting with EPSG.
+            # parts structure: [date_prefix] gru, vereinf, ID, NamePart1, NamePart2..., EPSG..., GeoPackage.gpkg
+            # Find the start of the name by locating 'vereinf' and skipping it and the ID
             name_parts = []
-            for p in parts[3:]:
+            
+            if 'vereinf' in parts:
+                start_idx = parts.index('vereinf') + 2
+            else:
+                start_idx = 3 # Fallback
+                
+            for p in parts[start_idx:]:
                 if p.startswith("EPSG"):
                     break
-                name_parts.append(p)
+                if p.endswith(".gpkg"): # in case EPSG is missing and it ends directly
+                    p = p.replace(".gpkg", "")
+                if p:
+                    name_parts.append(p)
             
             district = " ".join(name_parts)
             if not district: district = "Unknown"
