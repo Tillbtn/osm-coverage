@@ -219,10 +219,7 @@ def process_state(state, cfg):
             
         elif state == 'nrw':
             mapping = {
-                'Städteregion Aachen': 'Aachen, Städteregion',
-                'Oberbergischer Kreis': 'Oberberg.-Kreis',
-                'Rheinisch-Bergischer Kreis': 'Rhein.-Berg.-Kreis',
-                'Mülheim a.d. Ruhr': 'Mülheim Ruhr',
+                'Mülheim a.d. Ruhr': 'Mülheim ad Ruhr',
             }
             gdf['GEN'] = gdf['GEN'].apply(lambda x: mapping.get(x, x))
             
