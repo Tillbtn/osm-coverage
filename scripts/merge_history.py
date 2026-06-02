@@ -7,6 +7,7 @@ import argparse
 
 def merge_history(file_path, old_name, new_name):
     if not os.path.exists(file_path):
+        print(f"Error: File '{file_path}' does not exist.")
         return
         
     with open(file_path, 'r', encoding='utf-8') as f:
@@ -21,6 +22,7 @@ def merge_history(file_path, old_name, new_name):
         
     districts = data["districts"]
     if old_name not in districts:
+        print(f"Notice: '{old_name}' not found in {file_path}")
         return
         
     print(f"Found '{old_name}' in {file_path}, merging into '{new_name}'...")
@@ -68,6 +70,8 @@ if __name__ == "__main__":
     if not files:
         print("No history files found.")
         sys.exit(0)
-        
+    old_name = args.old.encode('utf-8').decode('unicode_escape')
+    new_name = args.new.encode('utf-8').decode('unicode_escape')
+    
     for f in files:
-        merge_history(f, args.old, args.new)
+        merge_history(f, old_name, new_name)
