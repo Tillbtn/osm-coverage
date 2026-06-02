@@ -189,6 +189,7 @@ function loadDistrict(name, preserveView = false) {
                 filter: function (feature) {
                     const props = feature.properties;
                     if (props.matched && shouldHideFeature(feature)) return false;
+                    if (props && props.correction_type === 'already_mapped') return false;
 
                     let cat = 'missing';
 
