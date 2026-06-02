@@ -50,7 +50,6 @@ STATES = {
     "mv": { "pbf_file": "mecklenburg-vorpommern-latest.osm.pbf" }
 }
 
-
 def apply_corrections(alkis_df, corrections_file, state):
     """
     Applies corrections from a JSON file to the ALKIS dataframe.
@@ -88,7 +87,7 @@ def apply_corrections(alkis_df, corrections_file, state):
     for corr in corrections:
         from_street = corr.get("from_street")
         replace_in_street = corr.get("replace_in_street")
-        tag = corr.get("tag", "corrected") # Allow custom tag from JSON, default to "corrected"
+        tag = corr.get("tag", corr.get("type", "corrected")) # Allow custom tag or type from JSON, default to "corrected"
         comment = corr.get("comment", None)
         official_report = corr.get("official_report", False)
         if official_report:
@@ -159,12 +158,13 @@ def apply_corrections(alkis_df, corrections_file, state):
                      candidate_indices = alkis_df[mask].index
                      if not candidate_indices.empty:
                          candidates = alkis_df.loc[candidate_indices]
+                         max_dist = corr.get("max_distance", 2000)
                          if candidates.crs and candidates.crs.is_geographic:
                              dists = candidates.geometry.distance(ref_geom)
-                             mask &= (dists < 0.02) # degrees
+                             mask &= (dists < (max_dist / 111320)) # degrees
                          else:
                              dists = candidates.geometry.distance(ref_geom)
-                             mask &= (dists <= 2000) # meters
+                             mask &= (dists <= max_dist) # meters
 
             if not mask.any():
                 continue
@@ -571,39 +571,6 @@ def main():
 
                     alkis.loc[mask_apply, 'correction_type'] = 'ignored'
                     alkis.loc[mask_apply, 'correction_comment'] = 'Automatisch ignoriert: Kleingarten'
-
-        # NDS specific changes
-        if state == "nds":
-            # Filter addresses for Wulfetannen in Osnabrück
-            mask_nds = (alkis['district'] == 'Osnabrück') & (alkis['street'] == 'Wulfetannen')
-            
-            if mask_nds.any():
-                ref_id = '8cabc3839fb7'
-                ref_row = alkis[alkis['alkis_id'] == ref_id]
-                if not ref_row.empty:
-                    ref_geom = ref_row.iloc[0].geometry
-                    candidates = alkis[mask_nds]
-                    dists = candidates.geometry.distance(ref_geom)
-                    mask_nds &= (dists <= 1000)
-
-                    print(f"[{state}] Marking {mask_nds.sum()} 'Wulfetannen' addresses as ignored.")                
-                    mask_apply = mask_nds & alkis['correction_type'].isna()
-                    if mask_apply.any():
-                        if 'original_street' not in alkis.columns:
-                            alkis['original_street'] = None
-                        if 'original_housenumber' not in alkis.columns:
-                            alkis['original_housenumber'] = None
-
-                        mask_no_orig = mask_apply & alkis['original_street'].isna()
-                        if mask_no_orig.any():
-                             alkis.loc[mask_no_orig, 'original_street'] = alkis.loc[mask_no_orig, 'street']
-
-                        mask_orig_hnr_nan = mask_apply & alkis['original_housenumber'].isna()
-                        if mask_orig_hnr_nan.any():
-                             alkis.loc[mask_orig_hnr_nan, 'original_housenumber'] = alkis.loc[mask_orig_hnr_nan, 'housenumber']
-
-                        alkis.loc[mask_apply, 'correction_type'] = 'ignored'
-                        alkis.loc[mask_apply, 'correction_comment'] = 'Automatisch ignoriert: Ferienhaussiedlung (vor Ort erst Buchstabe, dann Zahl)'
 
         # Expand Aachen Addresses
         if state == "nrw":

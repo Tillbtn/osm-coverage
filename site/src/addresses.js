@@ -80,9 +80,12 @@ try {
 
 function shouldHideFeature(feature) {
     const props = feature.properties;
+    if (props && props.correction_type === 'abbreviation') {
+        return true;
+    }
     if (props && isValid(props.correction_comment)) {
         const comment = props.correction_comment.toLowerCase();
-        if (comment.includes('abkürzung') || comment.includes('abgekürzt')) {
+        if (comment.includes('abkürzung') || comment.includes('abgekürzt') || comment.includes('ausgeschriebener name')) {
             return true;
         }
     }
@@ -538,7 +541,9 @@ class CorrectionModal {
                         <select id="corr-type" style="width: 100%; margin-bottom: 1rem; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.375rem;">
                             <option value="single">Adresse korrigieren</option>
                             <option value="street">Straßenname korrigieren (alle Nummern)</option>
+                            <option value="abbreviation">Abkürzung ersetzen (alle Nummern)</option>
                             <option value="ignore">Adresse ignorieren</option>
+                            <option value="ignore_street">Straße ignorieren (alle Nummern)</option>
                             <option value="already_mapped">Adresse bereits eingetragen</option>
                         </select>
                         
@@ -609,7 +614,9 @@ class CorrectionModal {
 
             if (e.target.value === 'single') { this.fieldsSingle.style.display = 'block'; this.officialContainer.style.display = 'flex'; }
             if (e.target.value === 'street') { this.fieldsStreet.style.display = 'block'; this.officialContainer.style.display = 'flex'; }
+            if (e.target.value === 'abbreviation') { this.fieldsStreet.style.display = 'block'; this.officialContainer.style.display = 'flex'; }
             if (e.target.value === 'ignore') { this.fieldsIgnore.style.display = 'block'; this.officialContainer.style.display = 'flex'; }
+            if (e.target.value === 'ignore_street') { this.fieldsIgnore.style.display = 'block'; this.officialContainer.style.display = 'flex'; }
             if (e.target.value === 'already_mapped') { this.fieldsIgnore.style.display = 'block'; this.officialContainer.style.display = 'none'; }
         });
 
@@ -653,17 +660,17 @@ class CorrectionModal {
         let correction = {};
 
         const comment = this.inputComment.value.trim();
-        if (!comment) {
+        if (!comment && type !== 'abbreviation') {
             this.msgDiv.textContent = 'Kommentar fehlt.';
             this.msgDiv.style.color = '#ef4444';
             return;
         }
-        correction.comment = comment;
+        correction.comment = type === 'abbreviation' ? (comment ? 'Abkürzung: ' + comment : 'Abkürzung') : comment;
         if (this.inputOfficial.checked && type !== 'already_mapped') {
             correction.official_report = true;
         }
 
-        if (type === 'street') {
+        if (type === 'street' || type === 'abbreviation') {
             correction.from_street = this.street;
             correction.city = currentDistrictName;
 
@@ -680,6 +687,13 @@ class CorrectionModal {
             }
             correction.to_street = toStreet;
 
+            if (this.alkisId) {
+                correction.reference_alkis_id = this.alkisId;
+            }
+        } else if (type === 'ignore_street') {
+            correction.from_street = this.street;
+            correction.city = currentDistrictName;
+            correction.ignore = true;
             if (this.alkisId) {
                 correction.reference_alkis_id = this.alkisId;
             }
@@ -722,6 +736,8 @@ class CorrectionModal {
                 correction.already_mapped = true;
             }
         }
+
+        correction.type = type;
 
         this.submitBtn.disabled = true;
         this.submitBtn.textContent = 'Sende...';
