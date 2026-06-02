@@ -681,8 +681,8 @@ def main():
                         return False
                     s_alkis = normalize_street(row['street_left'])
                     s_osm = normalize_street(row['street_right'])
-                    h_alkis = str(row['housenumber_left']).lower().strip()
-                    h_osm = str(row['housenumber_right']).lower().strip()
+                    h_alkis = str(row['housenumber_left']).lower().replace(" ", "").replace(",", "")
+                    h_osm = str(row['housenumber_right']).lower().replace(" ", "").replace(",", "")
                     
                     return (s_alkis != s_osm) and (h_alkis == h_osm)
                 
