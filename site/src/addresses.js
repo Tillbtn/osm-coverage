@@ -62,6 +62,8 @@ function zoomToDistrictBoundary(name) {
 const defaultVisibility = {
     missing: true,
     wrong_street: true,
+    wrong_street_abbreviation: true,
+    wrong_street_typo: true,
     corrected_osm: true,
     corrected_not_osm: true,
     ignored: true,
@@ -196,8 +198,8 @@ function loadDistrict(name, preserveView = false) {
                     if (props && isValid(props.correction_type)) {
                         if (props.correction_type === 'ignored') {
                             cat = 'ignored';
-                        } else if (props.correction_type === 'wrong_street') {
-                            cat = 'wrong_street';
+                        } else if (props.correction_type && props.correction_type.startsWith('wrong_street')) {
+                            cat = props.correction_type;
                         } else if (props.matched) {
                             cat = 'corrected_osm';
                         } else {
@@ -222,7 +224,11 @@ function loadDistrict(name, preserveView = false) {
                         if (props.correction_type === 'ignored') {
                             fillColor = "#9ca3af"; // Gray
                         } else if (props.correction_type === 'wrong_street') {
-                            fillColor = "#ff7214"; // Orange
+                            fillColor = "#ea580c"; // Orange 600
+                        } else if (props.correction_type === 'wrong_street_abbreviation') {
+                            fillColor = "#f97316"; // Orange 500
+                        } else if (props.correction_type === 'wrong_street_typo') {
+                            fillColor = "#fb923c"; // Orange 400
                         } else if (props.matched) {
                             fillColor = "#3b82f6"; // Blue
                         } else {
@@ -270,8 +276,12 @@ function loadDistrict(name, preserveView = false) {
                                 } else {
                                     title = "Abweichung vom ALKIS:";
                                 }
+                            } else if (props.correction_type === 'wrong_street_abbreviation') {
+                                title = "Abkürzung / Zusatz?";
+                            } else if (props.correction_type === 'wrong_street_typo') {
+                                title = "Typo?";
                             } else if (props.correction_type === 'wrong_street') {
-                                title = "Falscher Straßenname?";
+                                title = "Falsche Straßenzuordnung?";
                             }
 
                             const container = document.createElement('div');
@@ -285,7 +295,7 @@ function loadDistrict(name, preserveView = false) {
                                                     ${origStreet} ${origHnr}
                                                 </div>`;
                                 // wrong street
-                            } else if (props.correction_type === 'wrong_street') {
+                            } else if (props.correction_type && props.correction_type.startsWith('wrong_street')) {
                                 // normal
                                 if (!hasRealCorrection) {
                                     content = `<strong>${title}</strong><br>
@@ -408,6 +418,9 @@ function loadDistrict(name, preserveView = false) {
                                         let fillColor = "#ff4444";
                                         if (props && isValid(props.correction_type)) {
                                             if (props.correction_type === 'ignored') fillColor = "#9ca3af";
+                                            else if (props.correction_type === 'wrong_street') fillColor = "#ea580c";
+                                            else if (props.correction_type === 'wrong_street_abbreviation') fillColor = "#f97316";
+                                            else if (props.correction_type === 'wrong_street_typo') fillColor = "#fb923c";
                                             else if (props.matched) fillColor = "#3b82f6";
                                             else fillColor = "#8b5cf6";
                                         } else if (props && props.matched) {

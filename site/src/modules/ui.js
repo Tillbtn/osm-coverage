@@ -63,6 +63,14 @@ export function initHistoryChart(ctx, historyData) {
                                     const absDiff = prevMiss - currMiss;
                                     const absSign = absDiff >= 0 ? '+' : '';
                                     lines.push(`${absSign}${absDiff} Adressen`);
+
+                                    const currWs = rawData[index].wrong_street ?? 0;
+                                    const currWsAbbr = rawData[index].wrong_street_abbreviation ?? 0;
+                                    const currWsTypo = rawData[index].wrong_street_typo ?? 0;
+
+                                    if (currWs > 0 || currWsAbbr > 0 || currWsTypo > 0) {
+                                        lines.push(`Anderer Name: ${currWs} | Abk./Zusatz: ${currWsAbbr} | Typo: ${currWsTypo}`);
+                                    }
                                 }
 
                                 return lines;
