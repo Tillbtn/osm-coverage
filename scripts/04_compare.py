@@ -658,6 +658,8 @@ def main():
         
         # Identify Missing
         missing = alkis[~alkis['found_in_osm']].copy()
+        if 'correction_type' in missing.columns:
+            missing = missing[~missing['correction_type'].isin(['ignored', 'already_mapped'])]
         
         # Wrong Street Detection
         print(f"[{state}] Identifying 'wrong_street' candidates for {len(missing)} missing addresses...")

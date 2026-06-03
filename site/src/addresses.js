@@ -257,6 +257,7 @@ function loadDistrict(name, preserveView = false) {
                             const comment = isValid(props.correction_comment) ? props.correction_comment : '';
                             const origStreet = props.original_street ? props.original_street : street;
                             const origHnr = props.original_housenumber ? props.original_housenumber : hnr;
+                            const hasRealCorrection = (origStreet !== street) || (origHnr !== hnr);
                             const alkisId = props.alkis_id;
 
                             const lat = layer.getLatLng().lat;
@@ -286,7 +287,7 @@ function loadDistrict(name, preserveView = false) {
                                 // wrong street
                             } else if (props.correction_type === 'wrong_street') {
                                 // normal
-                                if (!props.original_street) {
+                                if (!hasRealCorrection) {
                                     content = `<strong>${title}</strong><br>
                                                     <div style="margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid #eee;">
                                                         <span style="color: #666; font-size: 0.9em;">ALKIS:</span><br>
@@ -313,7 +314,7 @@ function loadDistrict(name, preserveView = false) {
                                                     </div>`;
                                 }
                                 // ALKIS corrected, matched
-                            } else if (isMatched && (props.original_street || props.original_housenumber)) {
+                            } else if (isMatched && hasRealCorrection) {
                                 content = `<strong>${title}</strong><br>
                                                 <div style="margin-bottom: 4px;">
                                                     <span style="color: #666; font-size: 0.9em;">ALKIS:</span><br>
@@ -324,7 +325,7 @@ function loadDistrict(name, preserveView = false) {
                                                     ${street} ${hnr}
                                                 </div>`;
                                 // ALKIS corrected, not matched
-                            } else if (props.original_street || props.original_housenumber) {
+                            } else if (hasRealCorrection) {
                                 content = `<strong>${title}</strong><br>
                                                 <div style="margin-bottom: 4px;">
                                                     <span style="color: #666; font-size: 0.9em;">ALKIS (korrigiert):</span><br>
