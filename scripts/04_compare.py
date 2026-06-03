@@ -10,6 +10,7 @@ import numpy as np
 import tqdm
 import argparse
 import sys
+import difflib
 
 def normalize_street(street):
     s = str(street).lower()
@@ -84,7 +85,7 @@ def apply_corrections(alkis_df, corrections_file, state):
         
     count = 0
 
-    for corr in corrections:
+    for corr in tqdm.tqdm(corrections, desc=f"[{state}] Applying Corrections", ascii=True, disable=not sys.stdout.isatty()):
         from_street = corr.get("from_street")
         replace_in_street = corr.get("replace_in_street")
         tag = corr.get("tag", corr.get("type", "corrected")) # Allow custom tag or type from JSON, default to "corrected"
@@ -678,27 +679,65 @@ def main():
                 nn_join = nn_join[~nn_join.index.duplicated(keep='first')]
                 
                 # Filter for matching house numbers but differing street names
-                def is_wrong_street(row):
+                def strip_common(s):
+                    for suf in ['strasse', 'weg']:
+                        if s.endswith(suf):
+                            return s[:-len(suf)]
+                    return s
+
+                def classify_wrong_street(row):
                     if pd.isna(row['street_right']):
-                        return False
-                    s_alkis = normalize_street(row['street_left'])
-                    s_osm = normalize_street(row['street_right'])
+                        return None
+                    
+                    s_alkis_orig = str(row['street_left'])
+                    s_osm_orig = str(row['street_right'])
+                    s_alkis = normalize_street(s_alkis_orig)
+                    s_osm = normalize_street(s_osm_orig)
                     h_alkis = str(row['housenumber_left']).lower().replace(" ", "").replace(",", "")
                     h_osm = str(row['housenumber_right']).lower().replace(" ", "").replace(",", "")
                     
-                    return (s_alkis != s_osm) and (h_alkis == h_osm)
+                    if h_alkis != h_osm or s_alkis == s_osm:
+                        return None
+                        
+                    core_alkis = strip_common(s_alkis)
+                    core_osm = strip_common(s_osm)
+                    
+                    # 1. Abbreviation with dot
+                    has_dot = ('.' in s_alkis_orig) or ('.' in s_osm_orig)
+                    if has_dot and (core_alkis in core_osm or core_osm in core_alkis):
+                        return 'wrong_street_abbreviation'
+                        
+                    # 2. Prefix/Suffix (compound/addition like Gewerbestraße-Ost) -> group as abbreviation
+                    if (s_alkis.startswith(s_osm) or s_osm.startswith(s_alkis) or 
+                        s_alkis.endswith(s_osm) or s_osm.endswith(s_alkis)):
+                        if len(s_alkis) > 4 and len(s_osm) > 4:
+                            return 'wrong_street_abbreviation'
+                            
+                    # 3. Typo
+                    ratio = difflib.SequenceMatcher(None, s_alkis, s_osm).ratio()
+                    if ratio > 0.85:
+                        return 'wrong_street_abbreviation' if has_dot else 'wrong_street_typo'
+                        
+                    return 'wrong_street'
                 
-                mask_wrong_street_join = nn_join.apply(is_wrong_street, axis=1)
-                wrong_street_indices = nn_join[mask_wrong_street_join]['alkis_idx'].values
+                ws_classes = nn_join.apply(classify_wrong_street, axis=1)
                 
-                print(f"[{state}] Found {len(wrong_street_indices)} 'wrong_street' cases.")
+                mask_wrong_street_join = ws_classes.notna()
+                wrong_street_subset = nn_join[mask_wrong_street_join].copy()
+                wrong_street_subset['ws_class'] = ws_classes[mask_wrong_street_join]
+                
+                print(f"[{state}] Found {len(wrong_street_subset)} 'wrong_street' cases.")
                 
                 # Apply 'wrong_street' correction type to alkis
-                mask_apply = alkis['alkis_idx'].isin(wrong_street_indices)
-                alkis.loc[mask_apply, 'correction_type'] = 'wrong_street'
+                # Using map with the exact class instead of a single string
+                class_map = wrong_street_subset.set_index('alkis_idx')['ws_class'].to_dict()
+                
+                # Only apply where we have a mapping
+                mask_apply = alkis['alkis_idx'].isin(class_map.keys())
+                alkis.loc[mask_apply, 'correction_type'] = alkis.loc[mask_apply, 'alkis_idx'].map(class_map)
                 
                 # Create a mapping from alkis_idx to the found OSM street
-                osm_street_map = nn_join[mask_wrong_street_join].set_index('alkis_idx')['street_right'].to_dict()
+                osm_street_map = wrong_street_subset.set_index('alkis_idx')['street_right'].to_dict()
                 
                 # Vectorized map approach for speed using alkis_idx
                 alkis['osm_street'] = alkis['alkis_idx'].map(osm_street_map)
@@ -776,9 +815,15 @@ def main():
             
             # Count corrections
             d_corrections = 0
+            d_wrong_street = 0
+            d_wrong_street_abbreviation = 0
+            d_wrong_street_typo = 0
             if 'correction_type' in district_alkis.columns:
                  # Count corrections that result in a match or are ignored or already_mapped
                  d_corrections = int(((district_alkis['correction_type'].notna() & district_alkis['found_in_osm']) | district_alkis['correction_type'].isin(['ignored', 'already_mapped'])).sum())
+                 d_wrong_street = int((district_alkis['correction_type'] == 'wrong_street').sum())
+                 d_wrong_street_abbreviation = int((district_alkis['correction_type'] == 'wrong_street_abbreviation').sum())
+                 d_wrong_street_typo = int((district_alkis['correction_type'] == 'wrong_street_typo').sum())
 
             d_stats = {
                 "name": unique_name,
@@ -788,6 +833,9 @@ def main():
                 "missing": d_missing,
                 "coverage": d_coverage,
                 "corrections": int(d_corrections),
+                "wrong_street": d_wrong_street,
+                "wrong_street_abbreviation": d_wrong_street_abbreviation,
+                "wrong_street_typo": d_wrong_street_typo,
                 "path": f"states/{state}/districts/{out_filename}",
                 "filename": out_filename
             }
@@ -800,7 +848,10 @@ def main():
                 "total": d_total,
                 "missing": d_missing,
                 "coverage": d_coverage,
-                "corrections": int(d_corrections)
+                "corrections": int(d_corrections),
+                "wrong_street": d_wrong_street,
+                "wrong_street_abbreviation": d_wrong_street_abbreviation,
+                "wrong_street_typo": d_wrong_street_typo
             }
             
             if hist_key not in history_store["districts"]:
@@ -912,9 +963,15 @@ def main():
         global_coverage = round((state_total - state_missing) / state_total * 100, 2) if state_total > 0 else 100.0
         
         global_corrections = 0
+        g_wrong_street = 0
+        g_wrong_street_abbreviation = 0
+        g_wrong_street_typo = 0
         if 'correction_type' in alkis.columns:
              # Count corrections that result in a match or are ignored or already_mapped
              global_corrections = int(((alkis['correction_type'].notna() & alkis['found_in_osm']) | alkis['correction_type'].isin(['ignored', 'already_mapped'])).sum())
+             g_wrong_street = int((alkis['correction_type'] == 'wrong_street').sum())
+             g_wrong_street_abbreviation = int((alkis['correction_type'] == 'wrong_street_abbreviation').sum())
+             g_wrong_street_typo = int((alkis['correction_type'] == 'wrong_street_typo').sum())
 
         g_entry = {
              "date": export_date,
@@ -922,7 +979,10 @@ def main():
              "osm": state_osm_count,
              "missing": state_missing,
              "coverage": global_coverage,
-             "corrections": int(global_corrections)
+             "corrections": int(global_corrections),
+             "wrong_street": g_wrong_street,
+             "wrong_street_abbreviation": g_wrong_street_abbreviation,
+             "wrong_street_typo": g_wrong_street_typo
         }
         
         if not history_store["global"] or history_store["global"][-1]["date"] != export_date:
