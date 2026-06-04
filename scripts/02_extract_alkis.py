@@ -477,7 +477,7 @@ def process_nrw(directory):
                         norm_gdf['state'] = 'NRW'
                         
                         extra_seps = None
-                        if district in ["Aachen Städteregion", "Aachen_Städteregion", "Aachen, Städteregion"]:
+                        if district in ["Aachen Städteregion", "Aachen_Städteregion", "Aachen, Städteregion", "Städteregion Aachen"]:
                              extra_seps = ['/']
                              
                         norm_gdf = expand_complex_addresses(norm_gdf, extra_separators=extra_seps)
