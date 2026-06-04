@@ -639,18 +639,17 @@ def main():
             
             if osm_subset.empty: continue
                 
-            merged = pd.merge(
+            merged = gpd.sjoin(
                 chunk[['key', 'geometry', 'alkis_idx']],
                 osm_subset[['key', 'geometry']],
-                on='key',
                 how='inner',
-                suffixes=('_alkis', '_osm')
+                predicate='dwithin',
+                distance=150
             )
             
             if merged.empty: continue
                 
-            distances = merged['geometry_alkis'].distance(merged['geometry_osm'])
-            valid = merged[distances < 150] # allow 150m distance because OSM node may not be aligned with Alkis node
+            valid = merged[merged['key_left'] == merged['key_right']]
             found_indices.update(valid['alkis_idx'].unique())
             
         print(f"[{state}] Valid Matches: {len(found_indices)} / {len(alkis)}")
@@ -666,17 +665,25 @@ def main():
         print(f"[{state}] Identifying 'wrong_street' candidates for {len(missing)} missing addresses...")
         if len(missing) > 0 and len(osm) > 0:
             try:
-                # sjoin_nearest with max_distance
-                nn_join = gpd.sjoin_nearest(
-                    missing[['geometry', 'alkis_idx', 'street', 'housenumber']], 
-                    osm[['geometry', 'street', 'housenumber']], 
-                    how='left',
-                    distance_col='dist_nn',
-                    max_distance=20.0
-                )
+                # sjoin_nearest with max_distance (chunked to save memory)
+                CHUNK_SIZE_WS = 100000
+                nn_join_chunks = []
                 
-                # Handle duplicates (nearest first)
-                nn_join = nn_join[~nn_join.index.duplicated(keep='first')]
+                for i in range(0, len(missing), CHUNK_SIZE_WS):
+                    m_chunk = missing.iloc[i : i + CHUNK_SIZE_WS]
+                    chunk_join = gpd.sjoin_nearest(
+                        m_chunk[['geometry', 'alkis_idx', 'street', 'housenumber']], 
+                        osm[['geometry', 'street', 'housenumber']], 
+                        how='left',
+                        distance_col='dist_nn',
+                        max_distance=20.0
+                    )
+                    nn_join_chunks.append(chunk_join)
+                    
+                nn_join = pd.concat(nn_join_chunks, ignore_index=True)
+                
+                # Handle duplicates (nearest first - sjoin_nearest already returns nearest, but if multiple equidistant, drop)
+                nn_join = nn_join.drop_duplicates(subset=['alkis_idx'], keep='first')
                 
                 # Filter for matching house numbers but differing street names
                 def strip_common(s):
