@@ -492,6 +492,8 @@ def main():
     parser = argparse.ArgumentParser(description="Compare ALKIS and OSM data.")
     parser.add_argument("--adjust-history", action="store_true", help="Adjust historical statistics based on the delta from the current run.")
     parser.add_argument("--force", action="store_true", help="Force comparison even if up-to-date.")
+    parser.add_argument("--district", type=str, help="Run only for a specific district")
+    parser.add_argument("--state", type=str, help="Run only for a specific state")
     args = parser.parse_args()
     
     today = datetime.date.today().isoformat()
@@ -499,6 +501,8 @@ def main():
     found_any = False
 
     for state in STATES_LIST:
+        if args.state and state != args.state.lower():
+            continue
         alkis_path = os.path.join(DATA_DIR, state, "alkis.parquet")
         osm_path = os.path.join(DATA_DIR, state, "osm.parquet")
         corrections_file = os.path.join(SITE_DIR, state, f"{state}_alkis_corrections.json")
@@ -542,6 +546,15 @@ def main():
         except Exception as e:
            print(f"[{state}] Error loading data: {e}")
            continue
+
+        if 'district' not in alkis.columns:
+            alkis['district'] = f"Unknown_{state}"
+
+        if args.district:
+            if args.district not in alkis['district'].values:
+                continue
+            print(f"[{state}] Filtering data for district: {args.district}")
+            alkis = alkis[alkis['district'] == args.district].copy()
 
         # Apply Generic Corrections
         alkis = apply_corrections(alkis, corrections_file, state)
@@ -784,9 +797,7 @@ def main():
             except: pass
 
         # Districts Processing
-        if 'district' not in alkis.columns:
-            alkis['district'] = f"Unknown_{state}"
-        
+
         # Get OSM Snapshot Timestamp from PBF
         pbf_path = os.path.join("data", state, "osm", STATES[state]["pbf_file"])
         export_date = today 
@@ -802,8 +813,17 @@ def main():
         # print(f"Export date: {export_date}")
         districts = alkis['district'].unique()
         
-        district_list = []
-        
+        if args.district:
+            existing_districts = []
+            if os.path.exists(districts_file):
+                try:
+                    with open(districts_file, 'r') as f:
+                        existing_districts = json.load(f)
+                except: pass
+            district_list_map = {d["name"]: d for d in existing_districts}
+        else:
+            district_list_map = {}
+
         for district in tqdm.tqdm(districts, desc=f"[{state}] Processing Districts", ascii=True, disable=not sys.stdout.isatty()):
             district_alkis = alkis[alkis['district'] == district]
             # Exclude ignored and already_mapped addresses from missing
@@ -846,7 +866,7 @@ def main():
                 "path": f"states/{state}/districts/{out_filename}",
                 "filename": out_filename
             }
-            district_list.append(d_stats)
+            district_list_map[unique_name] = d_stats
             
             # History
             hist_key = unique_name
@@ -967,107 +987,109 @@ def main():
                     json.dump({"type": "FeatureCollection", "features": []}, f)
 
         # State Global Stats
-        global_coverage = round((state_total - state_missing) / state_total * 100, 2) if state_total > 0 else 100.0
-        
-        global_corrections = 0
-        g_wrong_street = 0
-        g_wrong_street_abbreviation = 0
-        g_wrong_street_typo = 0
-        if 'correction_type' in alkis.columns:
-             # Count corrections that result in a match or are ignored or already_mapped
-             global_corrections = int(((alkis['correction_type'].notna() & alkis['found_in_osm']) | alkis['correction_type'].isin(['ignored', 'already_mapped'])).sum())
-             g_wrong_street = int((alkis['correction_type'] == 'wrong_street').sum())
-             g_wrong_street_abbreviation = int((alkis['correction_type'] == 'wrong_street_abbreviation').sum())
-             g_wrong_street_typo = int((alkis['correction_type'] == 'wrong_street_typo').sum())
+        if not args.district:
+            global_coverage = round((state_total - state_missing) / state_total * 100, 2) if state_total > 0 else 100.0
 
-        g_entry = {
-             "date": export_date,
-             "alkis": state_total,
-             "osm": state_osm_count,
-             "missing": state_missing,
-             "coverage": global_coverage,
-             "corrections": int(global_corrections),
-             "wrong_street": g_wrong_street,
-             "wrong_street_abbreviation": g_wrong_street_abbreviation,
-             "wrong_street_typo": g_wrong_street_typo
-        }
-        
-        if not history_store["global"] or history_store["global"][-1]["date"] != export_date:
-            # History Adjustment (Global)
-            if history_store["global"]:
-                 ref_entry = history_store["global"][-1]
-                 delta_total = state_total - ref_entry["alkis"]
-                 delta_missing = state_missing - ref_entry["missing"]
-                 delta_corrections = global_corrections - ref_entry.get("corrections", 0)
-                 
-                 # Unconditional: Propagate Correction Changes
-                 if delta_corrections != 0:
-                     print(f"[{state}] Correction Propagation: {delta_corrections} changes applied.")
-                     for h_entry in history_store["global"]:
-                         current_corrs = h_entry.get("corrections", 0)
-                         # Set snapshot if missing
-                         if "original_corrections" not in h_entry: h_entry["original_corrections"] = current_corrs
-                         if "corrections" not in h_entry: h_entry["corrections"] = current_corrs
-                         
-                         h_entry["corrections"] = current_corrs + delta_corrections
-                         
-                         h_entry["missing"] -= delta_corrections
-                         if h_entry["missing"] < 0: h_entry["missing"] = 0
-                         
-                         ht = h_entry["alkis"]
-                         hm = h_entry["missing"]
-                         h_entry["coverage"] = round((ht - hm) / ht * 100, 2) if ht > 0 else 100.0
+            global_corrections = 0
+            g_wrong_street = 0
+            g_wrong_street_abbreviation = 0
+            g_wrong_street_typo = 0
+            if 'correction_type' in alkis.columns:
+                 # Count corrections that result in a match or are ignored or already_mapped
+                 global_corrections = int(((alkis['correction_type'].notna() & alkis['found_in_osm']) | alkis['correction_type'].isin(['ignored', 'already_mapped'])).sum())
+                 g_wrong_street = int((alkis['correction_type'] == 'wrong_street').sum())
+                 g_wrong_street_abbreviation = int((alkis['correction_type'] == 'wrong_street_abbreviation').sum())
+                 g_wrong_street_typo = int((alkis['correction_type'] == 'wrong_street_typo').sum())
 
-                 # Manual Flag: Propagate Residual Logic Changes (Total/Missing)
-                 if args.adjust_history:
-                     if ref_entry["date"] != export_date:
-                        print(f"      [Info] Global adjust against previous date ({ref_entry['date']}).")
+            g_entry = {
+                 "date": export_date,
+                 "alkis": state_total,
+                 "osm": state_osm_count,
+                 "missing": state_missing,
+                 "coverage": global_coverage,
+                 "corrections": int(global_corrections),
+                 "wrong_street": g_wrong_street,
+                 "wrong_street_abbreviation": g_wrong_street_abbreviation,
+                 "wrong_street_typo": g_wrong_street_typo
+            }
 
-                     residual_missing = delta_missing + delta_corrections
-                     
-                     if delta_total != 0 or residual_missing != 0:
-                         print(f"[{state}] Global Adjustment (Flag): Delta Total={delta_total}, Residual Delta Missing={residual_missing}")
+            if not history_store["global"] or history_store["global"][-1]["date"] != export_date:
+                # History Adjustment (Global)
+                if history_store["global"]:
+                     ref_entry = history_store["global"][-1]
+                     delta_total = state_total - ref_entry["alkis"]
+                     delta_missing = state_missing - ref_entry["missing"]
+                     delta_corrections = global_corrections - ref_entry.get("corrections", 0)
+
+                     # Unconditional: Propagate Correction Changes
+                     if delta_corrections != 0:
+                         print(f"[{state}] Correction Propagation: {delta_corrections} changes applied.")
                          for h_entry in history_store["global"]:
-                             h_entry["alkis"] += delta_total
-                             h_entry["missing"] += residual_missing
-                             
+                             current_corrs = h_entry.get("corrections", 0)
+                             # Set snapshot if missing
+                             if "original_corrections" not in h_entry: h_entry["original_corrections"] = current_corrs
+                             if "corrections" not in h_entry: h_entry["corrections"] = current_corrs
+
+                             h_entry["corrections"] = current_corrs + delta_corrections
+
+                             h_entry["missing"] -= delta_corrections
+                             if h_entry["missing"] < 0: h_entry["missing"] = 0
+
                              ht = h_entry["alkis"]
                              hm = h_entry["missing"]
                              h_entry["coverage"] = round((ht - hm) / ht * 100, 2) if ht > 0 else 100.0
 
-            history_store["global"].append(g_entry)
-        else:
-            # Entry exists for today (we are overwriting it).
-            # If adjusting, we still compare against the last entry in the list (which is today's entry before overwrite)
-            # This allows correcting a run from earlier today.
-            
-            if args.adjust_history and history_store["global"]:
-                 ref_entry = history_store["global"][-1]
-                 delta_total = state_total - ref_entry["alkis"]
-                 delta_missing = state_missing - ref_entry["missing"]
-                 delta_corrections = global_corrections - ref_entry.get("corrections", 0)
+                     # Manual Flag: Propagate Residual Logic Changes (Total/Missing)
+                     if args.adjust_history:
+                         if ref_entry["date"] != export_date:
+                            print(f"      [Info] Global adjust against previous date ({ref_entry['date']}).")
 
-                 if delta_total != 0 or delta_missing != 0:
-                     print(f"[{state}] Global Adjustment (Overwrite): Delta Total={delta_total}, Delta Missing={delta_missing}, Delta Corrections={delta_corrections}")
-                     for h_entry in history_store["global"]: 
-                         h_entry["alkis"] += delta_total
-                         h_entry["missing"] += delta_missing
-                         
-                         if "corrections" in h_entry:
-                             h_entry["corrections"] += delta_corrections
-                         else:
-                             h_entry["corrections"] = max(0, delta_corrections)
+                         residual_missing = delta_missing + delta_corrections
 
-                         ht = h_entry["alkis"]
-                         hm = h_entry["missing"]
-                         h_entry["coverage"] = round((ht - hm) / ht * 100, 2) if ht > 0 else 100.0
+                         if delta_total != 0 or residual_missing != 0:
+                             print(f"[{state}] Global Adjustment (Flag): Delta Total={delta_total}, Residual Delta Missing={residual_missing}")
+                             for h_entry in history_store["global"]:
+                                 h_entry["alkis"] += delta_total
+                                 h_entry["missing"] += residual_missing
 
-            history_store["global"][-1] = g_entry
-            
+                                 ht = h_entry["alkis"]
+                                 hm = h_entry["missing"]
+                                 h_entry["coverage"] = round((ht - hm) / ht * 100, 2) if ht > 0 else 100.0
+
+                history_store["global"].append(g_entry)
+            else:
+                # Entry exists for today (we are overwriting it).
+                # If adjusting, we still compare against the last entry in the list (which is today's entry before overwrite)
+                # This allows correcting a run from earlier today.
+
+                if args.adjust_history and history_store["global"]:
+                     ref_entry = history_store["global"][-1]
+                     delta_total = state_total - ref_entry["alkis"]
+                     delta_missing = state_missing - ref_entry["missing"]
+                     delta_corrections = global_corrections - ref_entry.get("corrections", 0)
+
+                     if delta_total != 0 or delta_missing != 0:
+                         print(f"[{state}] Global Adjustment (Overwrite): Delta Total={delta_total}, Delta Missing={delta_missing}, Delta Corrections={delta_corrections}")
+                         for h_entry in history_store["global"]:
+                             h_entry["alkis"] += delta_total
+                             h_entry["missing"] += delta_missing
+
+                             if "corrections" in h_entry:
+                                 h_entry["corrections"] += delta_corrections
+                             else:
+                                 h_entry["corrections"] = max(0, delta_corrections)
+
+                             ht = h_entry["alkis"]
+                             hm = h_entry["missing"]
+                             h_entry["coverage"] = round((ht - hm) / ht * 100, 2) if ht > 0 else 100.0
+
+                history_store["global"][-1] = g_entry
+
         # Write State Files
         with open(history_file, 'w') as f:
             json.dump(history_store, f, indent=2)
-            
+
+        district_list = list(district_list_map.values())
         district_list.sort(key=lambda x: x['name'])
         with open(districts_file, 'w') as f:
             json.dump(district_list, f, indent=2)
