@@ -58,7 +58,15 @@ def get_remote_date(url):
         # Regex to find: "contains all OSM data up to 2025-12-14T21:21:45Z"
         match = re.search(r"contains all OSM data up to ([\d-]{10}T[\d:]{8}Z)", response.text)
         if match:
-            return match.group(1)
+            date_str = match.group(1)
+            try:
+                from datetime import datetime
+                import zoneinfo
+                dt = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%SZ")
+                dt = dt.replace(tzinfo=zoneinfo.ZoneInfo("UTC"))
+                return dt.astimezone(zoneinfo.ZoneInfo("Europe/Berlin")).isoformat()
+            except ImportError:
+                return date_str
         else:
             print(f"[{url}] Error: Could not find timestamp pattern.")
             return None

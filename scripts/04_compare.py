@@ -525,7 +525,11 @@ def main():
                 reader.close()
                 
                 if header_ts:
-                    pbf_date_str = str(header_ts)
+                    try:
+                        import zoneinfo
+                        pbf_date_str = header_ts.astimezone(zoneinfo.ZoneInfo("Europe/Berlin")).isoformat()
+                    except ImportError:
+                        pbf_date_str = str(header_ts)
                     with open(history_file, 'r') as f:
                         history_store = json.load(f)
                     
@@ -806,7 +810,11 @@ def main():
              header_ts = reader.header().get("osmosis_replication_timestamp")
              reader.close()
              if header_ts:
-                 export_date = str(header_ts)
+                 try:
+                     import zoneinfo
+                     export_date = header_ts.astimezone(zoneinfo.ZoneInfo("Europe/Berlin")).isoformat()
+                 except ImportError:
+                     export_date = str(header_ts)
         except Exception as e:
             print(f"[{state}] Warning: Could not read PBF timestamp: {e}")
 
