@@ -64,9 +64,9 @@ def get_remote_date(url):
                 import zoneinfo
                 dt = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%SZ")
                 dt = dt.replace(tzinfo=zoneinfo.ZoneInfo("UTC"))
-                return dt.astimezone(zoneinfo.ZoneInfo("Europe/Berlin")).isoformat()
+                return dt.astimezone(zoneinfo.ZoneInfo("Europe/Berlin")).strftime("%Y-%m-%dT%H:%M:%S")
             except ImportError:
-                return date_str
+                return date_str[:19]
         else:
             print(f"[{url}] Error: Could not find timestamp pattern.")
             return None

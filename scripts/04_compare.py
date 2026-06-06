@@ -527,9 +527,9 @@ def main():
                 if header_ts:
                     try:
                         import zoneinfo
-                        pbf_date_str = header_ts.astimezone(zoneinfo.ZoneInfo("Europe/Berlin")).isoformat()
+                        pbf_date_str = header_ts.astimezone(zoneinfo.ZoneInfo("Europe/Berlin")).strftime("%Y-%m-%dT%H:%M:%S")
                     except ImportError:
-                        pbf_date_str = str(header_ts)
+                        pbf_date_str = str(header_ts)[:19] if len(str(header_ts)) >= 19 else str(header_ts)
                     with open(history_file, 'r') as f:
                         history_store = json.load(f)
                     
