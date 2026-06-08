@@ -488,6 +488,21 @@ def expand_address_ranges(df):
     
     return df
 
+def pbf_ts_to_local(header_ts):
+    """Convert a PBF header timestamp (UTC string like '2025-06-06T20:21:02Z')
+    to local Europe/Berlin time, formatted as 'YYYY-MM-DDTHH:MM:SS'.
+
+    osmium returns header tags as strings, so we parse before converting.
+    """
+    ts = str(header_ts)
+    try:
+        import zoneinfo
+        dt = datetime.datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
+        dt = dt.replace(tzinfo=zoneinfo.ZoneInfo("UTC"))
+        return dt.astimezone(zoneinfo.ZoneInfo("Europe/Berlin")).strftime("%Y-%m-%dT%H:%M:%S")
+    except (ImportError, ValueError):
+        return ts[:19] if len(ts) >= 19 else ts
+
 def main():
     STATES_LIST = ["nds", "nrw", "rlp", "bb", "hh", "he", "st", "sn", "be", "mv"]
     
@@ -532,11 +547,7 @@ def main():
                 reader.close()
                 
                 if header_ts:
-                    try:
-                        import zoneinfo
-                        pbf_date_str = header_ts.astimezone(zoneinfo.ZoneInfo("Europe/Berlin")).strftime("%Y-%m-%dT%H:%M:%S")
-                    except ImportError:
-                        pbf_date_str = str(header_ts)[:19] if len(str(header_ts)) >= 19 else str(header_ts)
+                    pbf_date_str = pbf_ts_to_local(header_ts)
                     with open(history_file, 'r') as f:
                         history_store = json.load(f)
                     
@@ -649,8 +660,7 @@ def main():
         # Matching Logic
         print(f"[{state}] Matching...")
         
-        alkis = alkis.reset_index(drop=True)
-        alkis['alkis_idx'] = alkis.index
+        alkis['alkis_idx'] = np.arange(len(alkis))
         
         found_indices = set()
         
