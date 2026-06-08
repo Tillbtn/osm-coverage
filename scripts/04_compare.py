@@ -33,10 +33,17 @@ def normalize_street(street):
     s = s.replace(" ", "").replace("-", "").replace(".", "").replace("/", "").replace(",", "")
     return s
 
+def normalize_hnr(hnr):
+    # Sub-address separators vary between sources and OSM ("17.1" vs "17/1" vs
+    # "17-1" all mean the same building). Collapse them to a single form so they
+    # match. They are collapsed, NOT removed, so "17.1" stays distinct from the
+    # real house number "171" (avoids false matches).
+    h = str(hnr).lower().replace(" ", "").replace(",", "")
+    return h.replace("/", ".").replace("-", ".")
+
 def normalize_key(street, hnr):
     s = normalize_street(street)
-    h = str(hnr).lower().replace(" ", "").replace(",", "")
-    return f"{s}{h}"
+    return f"{s}{normalize_hnr(hnr)}"
 
 STATES = {
     "nds": { "pbf_file": "niedersachsen-latest.osm.pbf" },
@@ -717,8 +724,8 @@ def main():
                     s_osm_orig = str(row['street_right'])
                     s_alkis = normalize_street(s_alkis_orig)
                     s_osm = normalize_street(s_osm_orig)
-                    h_alkis = str(row['housenumber_left']).lower().replace(" ", "").replace(",", "")
-                    h_osm = str(row['housenumber_right']).lower().replace(" ", "").replace(",", "")
+                    h_alkis = normalize_hnr(row['housenumber_left'])
+                    h_osm = normalize_hnr(row['housenumber_right'])
                     
                     if h_alkis != h_osm or s_alkis == s_osm:
                         return None

@@ -351,6 +351,12 @@ function loadDistrict(name, preserveView = false) {
                                 content = `<strong>${title}</strong><br>${street} ${hnr}<br><br>`;
                             }
 
+                            // Sub-address separator is ambiguous: ALKIS stores e.g. "hnr=17, adz=1"
+                            // but OSM may use ".", "/" or "-"
+                            if (/\d\s*[./-]\s*\d/.test(hnr)) {
+                                content += `<div style="color:#92400e; background:#fef3c7; border-radius:4px; padding:3px 6px; font-size:0.8em; margin-bottom:5px;">Trennzeichen unklar – vlt. „.“, „/“ oder „-“</div>`;
+                            }
+
                             if (comment) {
                                 content += `<div style="font-style: italic; margin-bottom: 5px; color: #555;">${comment}</div>`;
                             }

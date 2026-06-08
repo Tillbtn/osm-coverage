@@ -962,8 +962,15 @@ def process_he(directory):
              
              # Filter out invalid housenumbers (0)
              df = df[df['hnr'] != '0']
-             
-             df['housenumber'] = df['hnr'] + df['adz'].fillna('')
+
+             # adz is the Adressierungszusatz. A letter suffix is concatenated
+             # directly ("17" + "a" -> "17a"), but a purely numeric adz denotes a
+             # sub-address and needs a separator ("17" + "1" -> "17.1"), otherwise
+             # it collides with a real house number ("171").
+             # The OTG separator may be ".", "/" or "-"; matching normalizes these (04_compare).
+             adz = df['adz'].fillna('').astype(str).str.strip()
+             sep = np.where(adz.str.fullmatch(r'\d+'), '.', '')
+             df['housenumber'] = df['hnr'].astype(str) + sep + adz
              
              df = df.rename(columns={
                 'str': 'street',
