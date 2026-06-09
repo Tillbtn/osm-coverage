@@ -827,11 +827,7 @@ def main():
              header_ts = reader.header().get("osmosis_replication_timestamp")
              reader.close()
              if header_ts:
-                 try:
-                     import zoneinfo
-                     export_date = header_ts.astimezone(zoneinfo.ZoneInfo("Europe/Berlin")).isoformat()
-                 except ImportError:
-                     export_date = str(header_ts)
+                 export_date = pbf_ts_to_local(header_ts)
         except Exception as e:
             print(f"[{state}] Warning: Could not read PBF timestamp: {e}")
 
