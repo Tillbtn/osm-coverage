@@ -361,10 +361,6 @@ function loadDistrict(name, preserveView = false) {
                                 content += `<div style="font-style: italic; margin-bottom: 5px; color: #555;">${comment}</div>`;
                             }
 
-                            if (props.official_report) {
-                                content += `<div style="font-weight: 500; color: #3b82f6; margin-bottom: 5px; font-size: 0.9em;">Offizielle Meldung</div>`;
-                            }
-
                             if (!isMatched) {
                                 content += `<button class="correction-init-btn" style="background: #3b82f6; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.375rem; cursor: pointer; font-weight: 500; width: 100%; margin-bottom: 5px;">Falschmeldung?</button>`;
                             }
@@ -445,7 +441,7 @@ function loadDistrict(name, preserveView = false) {
                             if (corrBtn) {
                                 corrBtn.addEventListener('click', (e) => {
                                     e.stopPropagation();
-                                    correctionModal.open(street, hnr, props.alkis_id);
+                                    correctionModal.open(street, hnr, props.alkis_id, props);
                                     map.closePopup();
                                 });
                             }
@@ -584,11 +580,6 @@ class CorrectionModal {
                         <div id="corr-fields-ignore" style="display:none;">
                         </div>
 
-                        <div id="corr-official-container" style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; display:none;">
-                             <input type="checkbox" id="corr-official" style="width: auto; margin: 0;">
-                             <label for="corr-official" style="font-size: 0.9em; color: #4b5563; cursor: help;" title="Korrekturen werden gesammelt an die zuständige Behörde mit Bitte um Bearbeitung übermittelt">Offizielle Meldung?</label>
-                        </div>
-
                         <label style="display: block; margin-bottom: 0.25rem; font-size: 0.9em; color: #4b5563;">Kommentar</label>
                         <textarea id="corr-comment" rows="3" style="width: 100%; margin-bottom: 1rem; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.375rem; font-family: inherit;"></textarea>
 
@@ -611,8 +602,6 @@ class CorrectionModal {
         this.fieldsStreet = document.getElementById('corr-fields-street');
 
         this.fieldsIgnore = document.getElementById('corr-fields-ignore');
-        this.officialContainer = document.getElementById('corr-official-container');
-        this.inputOfficial = document.getElementById('corr-official');
 
         // Inputs
         this.inputSingleStreet = document.getElementById('corr-single-street');
@@ -633,41 +622,54 @@ class CorrectionModal {
             this.fieldsStreet.style.display = 'none';
             this.fieldsIgnore.style.display = 'none';
 
-            if (e.target.value === 'single') { this.fieldsSingle.style.display = 'block'; this.officialContainer.style.display = 'flex'; }
-            if (e.target.value === 'street') { this.fieldsStreet.style.display = 'block'; this.officialContainer.style.display = 'flex'; }
-            if (e.target.value === 'abbreviation') { this.fieldsStreet.style.display = 'block'; this.officialContainer.style.display = 'flex'; }
-            if (e.target.value === 'ignore') { this.fieldsIgnore.style.display = 'block'; this.officialContainer.style.display = 'flex'; }
-            if (e.target.value === 'ignore_street') { this.fieldsIgnore.style.display = 'block'; this.officialContainer.style.display = 'flex'; }
-            if (e.target.value === 'already_mapped') { this.fieldsIgnore.style.display = 'block'; this.officialContainer.style.display = 'none'; }
+            if (e.target.value === 'single') { this.fieldsSingle.style.display = 'block'; }
+            if (e.target.value === 'street') { this.fieldsStreet.style.display = 'block'; }
+            if (e.target.value === 'abbreviation') { this.fieldsStreet.style.display = 'block'; }
+            if (e.target.value === 'ignore') { this.fieldsIgnore.style.display = 'block'; }
+            if (e.target.value === 'ignore_street') { this.fieldsIgnore.style.display = 'block'; }
+            if (e.target.value === 'already_mapped') { this.fieldsIgnore.style.display = 'block'; }
         });
 
         this.submitBtn.addEventListener('click', () => this.submit());
     }
 
-    open(street, hnr, alkisId) {
+    open(street, hnr, alkisId, props = {}) {
         this.street = street;
         this.hnr = hnr;
         this.alkisId = alkisId;
         this.displayAddress.textContent = `${street} ${hnr}`;
 
-        // Reset fields
-        this.typeSelect.value = 'single';
-        this.fieldsSingle.style.display = 'block';
-        this.fieldsStreet.style.display = 'none';
+        // Preselect a correction type based on the detected discrepancy.
+        // The OSM name (on-the-ground name) is used as best guess for the correction.
+        const correctionType = props.correction_type;
+        const osmStreet = isValid(props.osm_street) ? props.osm_street : '';
 
-        this.fieldsIgnore.style.display = 'none';
-        this.officialContainer.style.display = 'flex';
+        let preselectType = 'single';
+        if (correctionType === 'wrong_street_abbreviation') {
+            preselectType = 'abbreviation';
+        } else if (correctionType === 'wrong_street_typo') {
+            preselectType = 'street';
+        } else if (correctionType === 'wrong_street') {
+            preselectType = 'single';
+        }
 
-        this.inputSingleStreet.value = street;
+        this.typeSelect.value = preselectType;
+
+        // Prefill the inputs. For street/abbreviation we prefill the street-all
+        // field, for single we prefill the street + keep the housenumber.
+        // Fall back to the ALKIS name when no OSM name is available.
+        this.inputSingleStreet.value = osmStreet || street;
         this.inputSingleHnr.value = hnr;
-        this.inputStreetAll.value = street;
+        this.inputStreetAll.value = osmStreet || street;
         this.inputComment.value = '';
-        this.inputOfficial.checked = false;
         this.msgDiv.textContent = '';
         this.msgDiv.className = '';
         this.submitBtn.disabled = false;
         this.submitBtn.textContent = 'Absenden';
         this.submitBtn.style.backgroundColor = '#3b82f6';
+
+        // Show the fields matching the preselected type (reuses the change handler).
+        this.typeSelect.dispatchEvent(new Event('change'));
 
         this.modal.style.display = 'block';
     }
@@ -687,9 +689,6 @@ class CorrectionModal {
             return;
         }
         correction.comment = type === 'abbreviation' ? (comment ? 'Abkürzung: ' + comment : 'Abkürzung') : comment;
-        if (this.inputOfficial.checked && type !== 'already_mapped') {
-            correction.official_report = true;
-        }
 
         if (type === 'street' || type === 'abbreviation') {
             correction.from_street = this.street;
