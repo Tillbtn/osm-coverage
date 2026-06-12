@@ -36,12 +36,16 @@ def remove_ortsteil(text):
 def generate_alkis_id(row):
     """
     Generates a unique ID for an ALKIS row based on its content and coordinates.
+
+    Coordinates (EPSG:25832 metres) are quantized to a ~100 m grid so the id is
+    stable across ALKIS re-extractions: mm-level centroid shifts no longer change
+    it (they used to, orphaning id-based corrections).
     """
     try:
-        geo_str = f"{row.geometry.x:.3f}_{row.geometry.y:.3f}" if row.geometry else "no_geo"
+        geo_str = f"{int(row.geometry.x // 100)}_{int(row.geometry.y // 100)}" if row.geometry else "no_geo"
     except:
         geo_str = "invalid_geo"
-        
+
     raw_str = f"{row.get('district', '')}_{row.get('street', '')}_{row.get('housenumber', '')}_{geo_str}"
     return hashlib.md5(raw_str.encode('utf-8')).hexdigest()[:12]
 
