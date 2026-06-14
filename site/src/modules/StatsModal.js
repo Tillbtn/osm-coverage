@@ -13,6 +13,11 @@ export class StatsModal {
         this.isVisible = false;
         this.activeDistrict = null;
 
+        // State-wide ALKIS export date, provided by the pipeline (history JSON).
+        // Used for the state ("global") view and as a fallback for districts
+        // without their own timestamp. Null when the state has no bulk date.
+        this.stateAlkisDate = (historyData && historyData.alkis_date) || null;
+
         this.init();
     }
 
@@ -43,6 +48,7 @@ export class StatsModal {
                     <div class="chart-container">
                         <canvas id="historyChart"></canvas>
                     </div>
+                    <div id="alkisStand" class="alkis-stand" title="Stand der ALKIS-Daten" style="display:none;"></div>
 
                     <div style="max-height: 200px; overflow-y: auto; overflow-x: auto; margin-top: 10px;">
                         <table id="historyTable" style="width: 100%; font-size: 0.9em; min-width: 300px;">
@@ -146,6 +152,7 @@ export class StatsModal {
         this.statsSelect.addEventListener('change', (e) => {
             const dataset = updateChart(e.target.value, this.historyData);
             renderHistoryTable(dataset, '#historyTable tbody');
+            this.updateAlkisStand(e.target.value);
 
             // Toggle Comparison Section visibility based on Global selection
             const isGlobal = (e.target.value === "global");
@@ -217,6 +224,43 @@ export class StatsModal {
             if (this.historyData.global) {
                 renderHistoryTable(this.historyData.global, '#historyTable tbody');
             }
+        }
+
+        this.updateAlkisStand(this.statsSelect.value);
+    }
+
+    // Formats an ALKIS date ("YYYY-MM-DD" or "YYYY-MM") as German "DD.MM.YYYY"
+    // / "MM.YYYY".
+    formatAlkisDate(alkisDate) {
+        const parts = String(alkisDate).split('-');
+        if (parts.length === 3) return `${parts[2]}.${parts[1]}.${parts[0]}`;
+        if (parts.length === 2) return `${parts[1]}.${parts[0]}`;
+        return alkisDate;
+    }
+
+    // Updates the ALKIS-Stand line below the history chart for the selected
+    // entry. Uses the district's own date, falling back to the state-level
+    // newest date; hides the line entirely when no date is available.
+    updateAlkisStand(value) {
+        const el = document.getElementById('alkisStand');
+        if (!el) return;
+
+        let date = null;
+        if (value === 'global') {
+            date = this.stateAlkisDate;
+        } else if (this.districtsData) {
+            const d = this.districtsData.find(x => x.name === value);
+            // Districts of this state fall back to the state date; other
+            // Bundesländer (no district data here) show nothing.
+            if (d) date = d.alkis_date || this.stateAlkisDate;
+        }
+
+        if (date) {
+            el.textContent = `ALKIS-Stand: ${this.formatAlkisDate(date)}`;
+            el.style.display = '';
+        } else {
+            el.textContent = '';
+            el.style.display = 'none';
         }
     }
 
@@ -293,6 +337,7 @@ export class StatsModal {
                     if (tableSection) tableSection.style.display = isGlobal ? 'block' : 'none';
                 }
             }
+            this.updateAlkisStand(this.statsSelect.value);
             this.updateToggleButton();
         }
 

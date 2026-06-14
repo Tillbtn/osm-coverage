@@ -268,6 +268,14 @@ select option {
     margin-bottom: 1rem;
 }
 
+#alkisStand.alkis-stand {
+    margin-top: -0.5rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.85em;
+    color: #666;
+    text-align: right;
+}
+
 @media (min-width: 768px) {
     .modal-content {
         width: 90%;

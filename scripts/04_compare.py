@@ -817,6 +817,17 @@ def main():
                     history_store = json.load(f)
             except: pass
 
+        # Load ALKIS source freshness (written by 02_extract_alkis.py /
+        # fetch_alkis_wfs.py, district-keyed plus a "__state__" state-wide entry)
+        alkis_meta = {}
+        alkis_meta_file = os.path.join(DATA_DIR, state, "alkis_meta.json")
+        if os.path.exists(alkis_meta_file):
+            try:
+                with open(alkis_meta_file, 'r') as f:
+                    alkis_meta = json.load(f)
+            except: pass
+        state_alkis_date = (alkis_meta.get("__state__") or {}).get("alkis_date")
+
         # Districts Processing
 
         # Get OSM Snapshot Timestamp from PBF
@@ -885,7 +896,8 @@ def main():
                 "wrong_street_abbreviation": d_wrong_street_abbreviation,
                 "wrong_street_typo": d_wrong_street_typo,
                 "path": f"states/{state}/districts/{out_filename}",
-                "filename": out_filename
+                "filename": out_filename,
+                "alkis_date": (alkis_meta.get(district) or {}).get("alkis_date"),
             }
             district_list_map[unique_name] = d_stats
             
@@ -1107,6 +1119,9 @@ def main():
                 history_store["global"][-1] = g_entry
 
         # Write State Files
+        # Surface the state-wide ALKIS export date so the frontend can show it
+        # for the state view and as a fallback for districts without their own.
+        history_store["alkis_date"] = state_alkis_date
         with open(history_file, 'w') as f:
             json.dump(history_store, f, indent=2)
 

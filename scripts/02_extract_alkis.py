@@ -1,19 +1,31 @@
 
 import os
 import glob
+import json
+import datetime
 import zipfile
 import geopandas as gpd
 import pandas as pd
 import tqdm
-import re 
-import numpy as np 
-from shapely.geometry import Point 
-import hashlib 
+import re
+import numpy as np
+from shapely.geometry import Point
+import hashlib
 import osmium
 from shapely import wkb
 
+# German month names -> number, for parsing "Ausgabedatum September 2025" style dates.
+_GERMAN_MONTHS = {
+    "januar": "01", "februar": "02", "märz": "03", "maerz": "03", "april": "04",
+    "mai": "05", "juni": "06", "juli": "07", "august": "08", "september": "09",
+    "oktober": "10", "november": "11", "dezember": "12",
+}
+
 # Configuration
 DATA_DIR = "data"
+# Sentinel key in alkis_meta.json holding the state-wide ALKIS export date
+# (distinct from per-district entries, which are keyed by district name).
+STATE_META_KEY = "__state__"
 # Subfolders
 DIR_NDS = os.path.join(DATA_DIR, "nds")
 DIR_NRW = os.path.join(DATA_DIR, "nrw")
@@ -329,6 +341,106 @@ def extract_osm_boundaries(pbf_path, admin_levels=['10']):
     return gdf
 
 
+def write_alkis_meta(state_dir, districts, alkis_date, source, state_wide=True):
+    """
+    Merge per-district ALKIS source freshness into <state_dir>/alkis_meta.json.
+
+    Shared by 02_extract_alkis.py (bulk sources) and fetch_alkis_wfs.py (WFS
+    sources) so both write the same district-keyed format that 04_compare.py
+    reads to surface 'alkis_date' on the map.
+
+    A bulk extract covers the whole state, so it also records the date under the
+    STATE_META_KEY entry, which 04_compare.py surfaces as the state-wide date.
+    Per-district WFS updates pass state_wide=False so a single refreshed district
+    never masquerades as the state's date.
+    """
+    meta_path = os.path.join(state_dir, "alkis_meta.json")
+
+    meta = {}
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+        except Exception:
+            meta = {}
+
+    entry = {
+        "alkis_date": alkis_date,
+        "fetched_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "source": source,
+    }
+    for district in districts:
+        meta[str(district)] = dict(entry)
+    if state_wide:
+        meta[STATE_META_KEY] = dict(entry)
+
+    os.makedirs(state_dir, exist_ok=True)
+    tmp = f"{meta_path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2, sort_keys=True)
+    os.replace(tmp, meta_path)
+    return meta_path
+
+
+def detect_alkis_date(state_name, alkis_source_dir):
+    """
+    Return (date_str 'YYYY-MM-DD' or 'YYYY-MM', source_label) for the official
+    ALKIS export date, read from the source files. Returns (None, None) for
+    sources that do not embed a date (NRW, ST, MV, NDS, HH, BE).
+    """
+    s = state_name.upper()
+    parent = os.path.dirname(alkis_source_dir)
+    try:
+        if s == "RLP":
+            # HK_OD-RP.csv metadata line: "Exportdatum: 08.01.2026 16:45:39"
+            for meta_csv in glob.glob(os.path.join(alkis_source_dir, "**", "HK_OD-RP.csv"), recursive=True):
+                for enc in ("latin1", "utf-8", "cp1252"):
+                    try:
+                        with open(meta_csv, "r", encoding=enc) as f:
+                            for line in f:
+                                if line.strip().lower().startswith("exportdatum"):
+                                    m = re.search(r"(\d{2})\.(\d{2})\.(\d{4})", line)
+                                    if m:
+                                        d, mo, y = m.groups()
+                                        return f"{y}-{mo}-{d}", "metadata:HK_OD-RP.csv"
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                break
+
+        elif s == "BB":
+            gpkg = os.path.join(alkis_source_dir, "adressen-bb.gpkg")
+            if os.path.exists(gpkg):
+                g = gpd.read_file(gpkg, layer="adressen-bb", columns=["aud"], rows=1, engine="pyogrio")
+                if "aud" in g.columns and not g.empty and pd.notna(g["aud"].iloc[0]):
+                    return str(g["aud"].iloc[0])[:10], "column:aud"
+
+        elif s == "SN":
+            # filename: hk_sn_adressen_20260402.txt
+            candidates = (glob.glob(os.path.join(alkis_source_dir, "*.txt")) +
+                          glob.glob(os.path.join(alkis_source_dir, "*.csv")) +
+                          glob.glob(os.path.join(parent, "*.txt")))
+            for f in candidates:
+                base = os.path.basename(f)
+                if base.startswith("old_"):
+                    continue
+                m = re.search(r"(\d{4})(\d{2})(\d{2})", base)
+                if m:
+                    return f"{m.group(1)}-{m.group(2)}-{m.group(3)}", "filename"
+
+        elif s == "HE":
+            # zip name: "...Ausgabedatum September 2025.zip" -> 2025-09
+            for f in glob.glob(os.path.join(alkis_source_dir, "*.zip")) + glob.glob(os.path.join(parent, "*.zip")):
+                base = os.path.basename(f).lower()
+                m = re.search(r"ausgabedatum\s+([a-zäöü]+)\s+(\d{4})", base)
+                if m and m.group(1) in _GERMAN_MONTHS:
+                    return f"{m.group(2)}-{_GERMAN_MONTHS[m.group(1)]}", "filename"
+    except Exception as e:
+        print(f"[{state_name}] Could not detect ALKIS date: {e}")
+
+    return None, None
+
+
 def process_state(state_name, state_dir, process_func):
     alkis_source_dir = os.path.join(state_dir, "alkis")
     output_file = os.path.join(state_dir, "alkis.parquet")
@@ -371,6 +483,17 @@ def process_state(state_name, state_dir, process_func):
             print(f"[{state_name}] Saved {new_count} addresses to {output_file} (previously {old_count}, diff: {diff_str})")
         else:
             print(f"[{state_name}] Saved {new_count} addresses to {output_file}")
+
+        # Record ALKIS source freshness when the source embeds a real export date.
+        alkis_date, date_source = detect_alkis_date(state_name, alkis_source_dir)
+        if alkis_date and 'district' in full_gdf.columns:
+            districts = full_gdf['district'].dropna().unique().tolist()
+            if districts:
+                meta_path = write_alkis_meta(state_dir, districts, alkis_date, date_source)
+                print(f"[{state_name}] ALKIS date {alkis_date} ({date_source}) "
+                      f"recorded for {len(districts)} district(s) -> {meta_path}")
+        else:
+            print(f"[{state_name}] No embedded ALKIS export date; alkis_date left null.")
     else:
         print(f"[{state_name}] No addresses found.")
 

@@ -51,6 +51,7 @@ _extract = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_extract)
 generate_alkis_id = _extract.generate_alkis_id
 expand_complex_addresses = _extract.expand_complex_addresses
+_write_alkis_meta = _extract.write_alkis_meta  # shared district-keyed sidecar writer
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +75,8 @@ expand_complex_addresses = _extract.expand_complex_addresses
 #   district_field : (state mode) WFS property to use as the district per row
 #   field_map      : property mapping, see below
 #   extra_separators: housenumber separators to split on (passed to expand_complex_addresses)
+#   date_field     : WFS property holding the ALKIS data date (e.g. "datum_auswertung");
+#                    recorded per district in data/<state>/alkis_meta.json (optional)
 #
 # field_map keys:
 #   street     : property holding the street name                 (required)
@@ -97,6 +100,7 @@ WFS_SOURCES = [
         # Must match the district name produced by process_nrw in 02_extract_alkis.py
         # and used by 04_compare corrections (see merge_history.py rename).
         "district": "Städteregion Aachen",
+        "date_field": "datum_auswertung",
         "field_map": {
             "street": "strasse_lage",
             "hnr": "hsnr",
@@ -258,6 +262,43 @@ def _write_parquet_atomic(gdf, path):
     os.replace(tmp, path)
 
 
+def extract_alkis_date(features, source):
+    """
+    Read the ALKIS data date (e.g. "datum_auswertung") from the raw features.
+    The value is uniform per feed; if several appear, keep the latest.
+    """
+    field = source.get("date_field")
+    if not field:
+        return None
+    dates = {
+        str((f.get("properties") or {}).get(field)).strip()
+        for f in features
+        if (f.get("properties") or {}).get(field)
+    }
+    return max(dates) if dates else None
+
+
+def write_alkis_meta(source, districts, alkis_date, dry_run=False):
+    """
+    Record ALKIS source freshness per district in data/<state>/alkis_meta.json.
+    This sidecar is read by 04_compare.py to surface 'alkis_date' on the map,
+    independent of when the comparison runs.
+    """
+    state_dir = os.path.join(DATA_DIR, source["state_dir"])
+    meta_path = os.path.join(state_dir, "alkis_meta.json")
+
+    print(f"[{source['key']}] alkis_date={alkis_date} for {len(districts)} district(s)")
+
+    if dry_run:
+        print(f"[{source['key']}] dry-run: not writing {meta_path}")
+        return
+
+    # A WFS run refreshes a single district, not the whole state, so it must not
+    # claim the state-wide date (state_wide=False).
+    _write_alkis_meta(state_dir, districts, alkis_date, f"wfs:{source['key']}", state_wide=False)
+    print(f"[{source['key']}] wrote {meta_path}")
+
+
 def update_district(new_gdf, source, dry_run=False):
     """
     Replace one district's rows inside an existing state parquet, leaving every
@@ -364,12 +405,19 @@ def run_source(source, dry_run=False):
 
     mode = source.get("mode", "district")
     if mode == "district":
-        return update_district(gdf, source, dry_run=dry_run)
+        ok = update_district(gdf, source, dry_run=dry_run)
     elif mode == "state":
-        return write_state(gdf, source, dry_run=dry_run)
+        ok = write_state(gdf, source, dry_run=dry_run)
     else:
         print(f"[{source['key']}] ERROR: unknown mode '{mode}'.")
         return False
+
+    if ok:
+        alkis_date = extract_alkis_date(features, source)
+        districts = sorted(gdf["district"].dropna().unique().tolist())
+        write_alkis_meta(source, districts, alkis_date, dry_run=dry_run)
+
+    return ok
 
 
 def main():
