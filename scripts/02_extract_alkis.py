@@ -666,10 +666,183 @@ def process_bb(directory):
         print(f"[BB] Error processing GPKG: {e}")
         return []
 
+def _format_hh_hnr(hausnr, zusatz):
+    """Combine hausnr + zusatz into a single house number string."""
+    hausnr = (hausnr or '').strip()
+    zusatz = (zusatz or '').strip()
+    if not zusatz:
+        return hausnr
+    # A bare-numeric suffix needs a separator so "17" + "1" doesn't become the
+    # unrelated "171". Letters ("a") and already dash-prefixed numerics ("-1",
+    # "a-2") concatenate directly. normalize_hnr (04_compare) collapses the "."
+    # again when matching against OSM.
+    if re.fullmatch(r'\d+', zusatz):
+        return f"{hausnr}.{zusatz}"
+    return f"{hausnr}{zusatz}"
+
+
+def _parse_hh_fme(gml_path):
+    """
+    Parse Hamburg's FME FeatureCollection GML.
+
+    Newer Hamburg ALKIS deliveries are flat <fme:adressen> features with
+    strname/hausnr/zusatz/plz/portsname fields and a gml:pos (EPSG:25832).
+    """
+    import xml.etree.ElementTree as ET
+
+    data = []
+    context = ET.iterparse(gml_path, events=('end',))
+
+    for event, elem in context:
+        tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+        if tag != 'adressen':
+            continue
+
+        fields = {}
+        pos_text = None
+        for child in elem.iter():
+            ctag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+            if ctag in ('strname', 'hausnr', 'zusatz', 'plz', 'portsname') and child.text:
+                fields[ctag] = child.text.strip()
+            elif ctag == 'pos' and child.text:
+                pos_text = child.text.strip()
+        elem.clear()
+
+        street = fields.get('strname')
+        hausnr = fields.get('hausnr')
+        if not street or not hausnr or not pos_text:
+            continue
+
+        coords = pos_text.split()
+        if len(coords) < 2:
+            continue
+        try:
+            x, y = float(coords[0]), float(coords[1])
+        except ValueError:
+            continue
+
+        data.append({
+            'street': street,
+            'housenumber': _format_hh_hnr(hausnr, fields.get('zusatz')),
+            'postcode': fields.get('plz'),
+            'city': fields.get('portsname') or 'Hamburg',
+            'district': 'Hamburg',
+            'geometry': Point(x, y),
+        })
+
+    return data
+
+
+def _parse_hh_inspire(gml_path, ns):
+    """
+    Parse the older INSPIRE GML format (<ad:Address> / <ad:ThoroughfareName>).
+
+    Kept as a fallback for legacy deliveries; returns a list of dicts shaped
+    like _parse_hh_fme so process_hh can treat both uniformly.
+    """
+    import xml.etree.ElementTree as ET
+
+    streets = {}  # id -> name
+    addresses = []
+
+    try:
+        context = ET.iterparse(gml_path, events=('end',))
+
+        for event, elem in context:
+            tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+
+            if tag == "ThoroughfareName":
+                gml_id = elem.get(f"{{{ns['gml']}}}id")
+                if not gml_id:
+                    gml_id = elem.get("id")
+
+                name_text = None
+                for text_node in elem.iter():
+                    if text_node.tag.endswith('text') and text_node.text:
+                        name_text = text_node.text
+                        break
+
+                if gml_id and name_text:
+                    gml_id = gml_id.strip()
+                    streets[f"#{gml_id}"] = name_text
+                    streets[gml_id] = name_text
+
+                elem.clear()
+
+            elif tag == "Address":
+                pos_text = None
+                for pos in elem.iter():
+                    if pos.tag.endswith('pos'):
+                        pos_text = pos.text
+                        break
+
+                hnr_parts = []
+                for node in elem.iter():
+                    if node.tag.endswith('designator') and node.text and node.text.strip():
+                        hnr_parts.append(node.text.strip())
+
+                if hnr_parts:
+                    hnr_text = hnr_parts[0]
+                    for part in hnr_parts[1:]:
+                        if part.lower().startswith("haus"):
+                            hnr_text += f", {part}"
+                        else:
+                            hnr_text += part
+                else:
+                    hnr_text = None
+
+                street_ref = None
+                for comp in elem.iter():
+                    if comp.tag.endswith('component'):
+                        href = comp.get('{http://www.w3.org/1999/xlink}href')
+                        if href and ("ThoroughfareName" in href or "thoroughfare" in href.lower()):
+                            street_ref = href.strip()
+                            break
+
+                if pos_text and hnr_text and street_ref:
+                    addresses.append({
+                        'hnr': hnr_text,
+                        'pos': pos_text,
+                        'street_ref': street_ref,
+                    })
+
+                elem.clear()
+
+    except Exception as e:
+        print(f"[HH] Error parsing {gml_path}: {e}")
+        return []
+
+    print(f"[HH] Found {len(streets)} streets and {len(addresses)} addresses.")
+
+    data = []
+    for addr in addresses:
+        s_ref = addr['street_ref']
+        street_name = streets.get(s_ref)
+        if not street_name and s_ref.startswith('#'):
+            street_name = streets.get(s_ref[1:])
+
+        if not street_name:
+            continue
+
+        try:
+            coords = addr['pos'].strip().split()
+            if len(coords) >= 2:
+                x, y = float(coords[0]), float(coords[1])
+                data.append({
+                    'street': street_name,
+                    'housenumber': addr['hnr'],
+                    'postcode': None,
+                    'city': 'Hamburg',
+                    'district': 'Hamburg',
+                    'geometry': Point(x, y),
+                })
+        except Exception:
+            pass
+
+    return data
+
+
 def process_hh(directory):
-    # Expects data/hh/alkis.zip or data/hh/*.gml
-    # Usually "INSPIRE_Adressen_Hauskoordinaten_HH_*.gml" inside zip
-    
     # 1. Check for GML files directly
     gmls = glob.glob(os.path.join(directory, "*.gml"))
     gmls += glob.glob(os.path.join(directory, "*.GML"))
@@ -692,193 +865,38 @@ def process_hh(directory):
         gmls = glob.glob(os.path.join(directory, "*.gml"))
 
     if not gmls:
-        # Fallback: Check parent directory (data/hh)
-        parent = os.path.dirname(directory)
-        gmls = glob.glob(os.path.join(parent, "*.gml"))
-        
-        if not gmls:
-             # Check for zip in parent
-             zips = glob.glob(os.path.join(parent, "*.zip"))
-             if zips:
-                 for z in zips:
-                      try:
-                         print(f"[HH] Extracting {z}...")
-                         with zipfile.ZipFile(z, 'r') as zf:
-                             for n in zf.namelist():
-                                 if n.lower().endswith('.gml'):
-                                     zf.extract(n, directory) # Extract to alkis folder
-                      except: pass
-             gmls = glob.glob(os.path.join(directory, "*.gml"))
-
-    if not gmls:
         print(f"[HH] No GML files found in {directory} or parent.")
         return []
         
     results = []
-    
-    import xml.etree.ElementTree as ET
-    
-    # Namespaces usually found in INSPIRE GML
+
+    # Namespaces used by the legacy INSPIRE GML format (fallback parser)
     ns = {
         'gml': 'http://www.opengis.net/gml/3.2',
         'ad': 'http://inspire.ec.europa.eu/schemas/ad/4.0', # Version might vary (3.0 or 4.0)
         'base': 'http://inspire.ec.europa.eu/schemas/base/3.3'
     }
-    
-    # Alternative namespaces if above fail
-    # We will try to detect or just use wildcard search or local-name() in XPath if possible
-    # But ET only supports simple dict.
-    
+
     for gml_path in gmls:
         print(f"[HH] Parsing {os.path.basename(gml_path)} (this may take a while)...")
-        
-        # We need to handle two types of objects:
-        # 1. Address (contains housenumber, geometry, and link to component)
-        # 2. ThoroughfareName (contains street name) OR AddressComponent (Street)
-        
-        # Strategy: Pass 1 to build Street Map, Pass 2 to build Addresses
-        # Or if file is small enough, load all. INSPIRE GML can be 500MB+.
-        # Iterparse is recommended.
-        
-        streets = {} # id -> name
-        addresses = []
-        
-        try:
-            context = ET.iterparse(gml_path, events=('end',))
-            
-            for event, elem in context:
-                # Remove namespace for easier checking (hacky but effective for varied GML versions)
-                tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
-                
-                if tag == "ThoroughfareName":
-                    # Structure: <ad:ThoroughfareName gml:id="..."> ... <ad:name> <ad:GeographicalName> ... <ad:spelling> <ad:SpellingOfName> <ad:text>Name</ad:text>
-                    # This is DEEP.
-                    # Simplified check:
-                    gml_id = elem.get(f"{{{ns['gml']}}}id")
-                    if not gml_id: gml_id = elem.get("id") # fallback
-                     
-                    # Find name text
-                    # We look for 'text' element deeply
-                    name_text = None
-                    for text_node in elem.iter():
-                        if text_node.tag.endswith('text') and text_node.text:
-                            name_text = text_node.text
-                            break
-                    
-                    if gml_id and name_text:
-                        gml_id = gml_id.strip()
-                        streets[f"#{gml_id}"] = name_text
-                        streets[gml_id] = name_text
-                        
-                    elem.clear()
-                    
-                elif tag == "Address":
-                    # <ad:Address gml:id="...">
-                    #   <ad:position> ... <gml:Point> ... <gml:pos>X Y</gml:pos>
-                    #   <ad:locator> ... <ad:designator> ... <ad:text>123</ad:text> or <ad:designator>123</ad:designator>
-                    #   <ad:component xlink:href="#id_of_street"/>
-                    
-                    # Extract Geometry
-                    pos_text = None
-                    for pos in elem.iter():
-                         if pos.tag.endswith('pos'): 
-                             pos_text = pos.text
-                             break
-                    
-                    # Extract Housenumber
-                    # Extract Housenumber
-                    hnr_parts = []
-                    for node in elem.iter():
-                        if node.tag.endswith('designator') and node.text and node.text.strip():
-                             hnr_parts.append(node.text.strip())
-                    
-                    if hnr_parts:
-                        hnr_text = hnr_parts[0]
-                        for part in hnr_parts[1:]:
-                            if part.lower().startswith("haus"):
-                                hnr_text += f", {part}"
-                            else:
-                                hnr_text += part
-                    else:
-                        hnr_text = None
-                    
-                    # Improve HNR extraction: Look specifically inside AddressLocator
-                    # But iter() is depth-first.
-                    
-                    # Extract Street Ref
-                    street_ref = None
-                    street_ref = None
-                    for comp in elem.iter():
-                        if comp.tag.endswith('component'):
-                            href = comp.get('{http://www.w3.org/1999/xlink}href')
-                            if href and ("ThoroughfareName" in href or "thoroughfare" in href.lower()):
-                                street_ref = href.strip()
-                                break
-                    
-                    if pos_text and hnr_text and street_ref:
-                         addresses.append({
-                             'hnr': hnr_text,
-                             'pos': pos_text,
-                             'street_ref': street_ref
-                         })
-                         
-                    elem.clear()
 
-        except Exception as e:
-            print(f"[HH] Error parsing {gml_path}: {e}")
-            continue
-            
-        print(f"[HH] Found {len(streets)} streets and {len(addresses)} addresses.")
-        
-        # Build GDF
-        data = []
-        
-        for addr in addresses:
-            s_ref = addr['street_ref']
-            street_name = streets.get(s_ref)
-            
-            # If not found directly, try cleaning ref
-            if not street_name:
-                 # Check for urn stripping or hash mismatch
-                 # Example s_ref: "urn:ogc:def:crs:EPSG::25832" -> this is NOT a street ref usually
-                 # Example s_ref: "#DEHH..." 
-                 
-                 if s_ref.startswith('#'):
-                     street_name = streets.get(s_ref[1:])
-                 elif s_ref in streets:
-                     street_name = streets[s_ref]
-                 else:
-                     # Try finding by partial match?
-                     pass
-            
-            if not street_name and len(data) < 5:
-                # Debug failed lookups for first few
-                 print(f"DEBUG: Failed lookup for ref '{s_ref}'")
-            s_ref = addr['street_ref']
-            street_name = streets.get(s_ref)
-            
-            # If not found directly, try cleaning ref
-            if not street_name:
-                 # sometimes refs are urns: urn:ogc:def:crs... no, refs to objects.
-                 # "urn:x:y:StreetID"
-                 pass
-                 
-            if street_name:
-                try:
-                    coords = addr['pos'].strip().split()
-                    if len(coords) >= 2:
-                        x, y = float(coords[0]), float(coords[1])
-                        
-                        data.append({
-                            'street': street_name,
-                            'housenumber': addr['hnr'],
-                            'postcode': None,
-                            'city': 'Hamburg',
-                            'district': 'Hamburg', # Single district for now
-                            'geometry': Point(x, y)
-                        })
-                except: pass
-                
+        # Detect format: newer Hamburg exports are FME FeatureCollections with
+        # flat <fme:adressen> features; older deliveries were INSPIRE GML with
+        # <ad:Address>/<ad:ThoroughfareName>. Peek at the file header to decide.
+        is_fme = False
+        try:
+            with open(gml_path, 'r', encoding='utf-8', errors='ignore') as fh:
+                head = fh.read(8192)
+                is_fme = ('fme:adressen' in head) or ('safe.com/gml/fme' in head)
+        except Exception:
+            pass
+
+        if is_fme:
+            data = _parse_hh_fme(gml_path)
+            print(f"[HH] Found {len(data)} addresses (FME format).")
+        else:
+            data = _parse_hh_inspire(gml_path, ns)
+
         if data:
             gdf = gpd.GeoDataFrame(data, crs="EPSG:25832") # INSPIRE usually 25832 or 4258. Check GML srsName.
             # Assuming 25832 for Germany/Hamburg usually.
