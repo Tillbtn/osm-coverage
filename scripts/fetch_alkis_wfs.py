@@ -1,22 +1,17 @@
 """
-Fetch ALKIS address data from a WFS endpoint and feed it into the pipeline.
-
-Unlike the bulk `01_download_alkis_<state>.py` + `02_extract_alkis.py` pair, a WFS
-source is fetched and normalized in a single step. It is meant to be run on its
-own (e.g. weekly) cadence, separate from the periodic bulk dumps.
+Fetch ALKIS address data from a WFS endpoint and integrate it into the respective 
+alkis.parquet file.
 
 Two modes (configured per source):
 
   - mode="district": fetch a single district and *replace that district's rows*
-    inside an existing state parquet (e.g. refresh "Städteregion Aachen" inside
-    data/nrw/alkis.parquet, leaving the rest of NRW untouched).
+    inside an existing state parquet
 
   - mode="state": fetch a whole state from one WFS link and write/overwrite
-    data/<state>/alkis.parquet entirely.
+    data/<state>/alkis.parquet entirely
 
 The normalized rows use the exact same schema and the same `generate_alkis_id`
-hash as 02_extract_alkis.py, so corrections (matched by alkis_id) stay stable
-across the GPKG -> WFS switch.
+hash as 02_extract_alkis.py
 
 Usage:
     python scripts/fetch_alkis_wfs.py --list
@@ -97,8 +92,6 @@ WFS_SOURCES = [
         "state_dir": "nrw",
         "state_label": "NRW",
         "mode": "district",
-        # Must match the district name produced by process_nrw in 02_extract_alkis.py
-        # and used by 04_compare corrections (see merge_history.py rename).
         "district": "Städteregion Aachen",
         "date_field": "datum_auswertung",
         "field_map": {
@@ -106,10 +99,7 @@ WFS_SOURCES = [
             "hnr": "hsnr",
             "hnr_suffix": "hsnrzus",
             "city": "gmdname",
-            # no postcode in this dataset
         },
-        # Aachen house numbers use "/" as a range separator (e.g. 17/19),
-        # matching the existing process_nrw handling.
         "extra_separators": ["/"],
     },
 ]
@@ -247,7 +237,6 @@ def normalize_features(features, source):
     gdf = gpd.GeoDataFrame(gdf, geometry="geometry", crs=TARGET_CRS)
     gdf = gdf.drop_duplicates(subset=["street", "housenumber", "district", "city"])
 
-    # Same id hash as the bulk extractor -> corrections stay matched.
     gdf["alkis_id"] = gdf.apply(generate_alkis_id, axis=1)
 
     return gdf.reset_index(drop=True)
@@ -293,8 +282,6 @@ def write_alkis_meta(source, districts, alkis_date, dry_run=False):
         print(f"[{source['key']}] dry-run: not writing {meta_path}")
         return
 
-    # A WFS run refreshes a single district, not the whole state, so it must not
-    # claim the state-wide date (state_wide=False).
     _write_alkis_meta(state_dir, districts, alkis_date, f"wfs:{source['key']}", state_wide=False)
     print(f"[{source['key']}] wrote {meta_path}")
 
@@ -391,7 +378,79 @@ def write_state(new_gdf, source, dry_run=False):
     return True
 
 
-def run_source(source, dry_run=False):
+def read_stored_alkis_date(source):
+    """
+    Return the alkis_date already recorded in data/<state>/alkis_meta.json for
+    this source, or None if absent. Used to skip a full WFS download when the
+    feed has not been refreshed since the last run.
+    """
+    meta_path = os.path.join(DATA_DIR, source["state_dir"], "alkis_meta.json")
+    if not os.path.exists(meta_path):
+        return None
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        return None
+
+    district = source.get("district")
+    if district and district in meta:
+        return (meta[district] or {}).get("alkis_date")
+    # state mode / unknown district: fall back to the latest recorded date.
+    dates = [(v or {}).get("alkis_date") for v in meta.values()]
+    dates = [d for d in dates if d]
+    return max(dates) if dates else None
+
+
+def probe_alkis_date(source, session=None, timeout=60):
+    """
+    Cheaply fetch a single feature to read its date_field without downloading 
+    the whole layer. The date is uniform per feed, so one feature is enough. 
+    Returns the date string, or None if unavailable.
+    """
+    field = source.get("date_field")
+    if not field:
+        return None
+
+    session = session or requests.Session()
+    params = {
+        "service": "WFS",
+        "version": source.get("version", "1.1.0"),
+        "request": "GetFeature",
+        "typeName": source["typename"],
+        "srsName": source.get("srs", TARGET_CRS),
+        "outputFormat": "application/vnd.geo+json",
+        "startIndex": 0,
+        source.get("count_param", "maxFeatures"): 1,
+    }
+    try:
+        resp = session.get(source["base_url"], params=params, timeout=timeout)
+        resp.raise_for_status()
+        try:
+            data = resp.json()
+        except json.JSONDecodeError:
+            data = json.load(io.BytesIO(resp.content))
+    except Exception as e:
+        print(f"[{source['key']}] date probe failed ({e}); proceeding with full fetch.")
+        return None
+
+    feats = data.get("features", [])
+    if not feats:
+        return None
+    return str((feats[0].get("properties") or {}).get(field) or "").strip() or None
+
+
+def run_source(source, dry_run=False, force=False):
+    if not force and source.get("date_field"):
+        stored = read_stored_alkis_date(source)
+        probe = probe_alkis_date(source)
+        if stored and probe and probe <= stored:
+            print(f"[{source['key']}] WFS date {probe} not newer than stored "
+                  f"{stored}; skipping fetch (use --force to override).")
+            return True
+        print(f"[{source['key']}] WFS date {probe or '?'} vs stored "
+              f"{stored or 'none'}; proceeding with fetch.")
+
     print(f"\n[{source['key']}] fetching WFS '{source['typename']}' ...")
     features = fetch_wfs_features(source)
     print(f"[{source['key']}] {len(features)} raw features fetched.")
@@ -427,6 +486,9 @@ def main():
     parser.add_argument("--list", action="store_true", help="List configured sources and exit")
     parser.add_argument("--dry-run", action="store_true",
                         help="Fetch and normalize but do not write any parquet")
+    parser.add_argument("--force", action="store_true",
+                        help="Fetch even if the feed's date is not newer than "
+                             "the date stored in alkis_meta.json")
     args = parser.parse_args()
 
     if args.list:
@@ -448,7 +510,7 @@ def main():
     ok = True
     for source in sources:
         try:
-            if not run_source(source, dry_run=args.dry_run):
+            if not run_source(source, dry_run=args.dry_run, force=args.force):
                 ok = False
         except Exception as e:
             ok = False

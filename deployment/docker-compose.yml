@@ -40,6 +40,7 @@ services:
       - ../public_data:/app/site/public
       # Mount scripts for easier dev/updates without rebuild
       - ../scripts:/app/scripts
+      - ../deployment/run_updates.sh:/app/run_updates.sh
       # Persist backups (in project root backups/)
       - ../backups:/app/backups
     environment:

@@ -45,6 +45,8 @@ if [ $CHECK_STATUS -eq 0 ]; then
     # # 2. Extract
     # echo "Running 02_extract_alkis.py..."
     # python scripts/02_extract_alkis.py
+    echo "Fetching WFS data..."
+    python scripts/fetch_alkis_wfs.py --source aachen
 
     # 3. Fetch OSM
     # Using 03_import_osm.py (Addresses)
