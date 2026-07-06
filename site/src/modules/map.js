@@ -1,11 +1,14 @@
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
-export function createMap(elementId, center = [52.9, 9.8], zoom = 8) {
+export function createMap(elementId, extraAttributions = [], center = [52.9, 9.8], zoom = 8) {
     const map = L.map(elementId).setView(center, zoom);
 
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        attribution: [
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            ...extraAttributions,
+        ].join(' | ')
     }).addTo(map);
 
     return map;

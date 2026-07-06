@@ -1,6 +1,7 @@
 import './style.css';
 import L from 'leaflet';
 import { createMap, createJOSMLink, createOSMLink } from './modules/map';
+import { mapAttributions } from './modules/attribution';
 import { fetchDistricts, fetchHistory, fetchGeoJSON } from './modules/api';
 import { StatsModal } from './modules/StatsModal';
 import { createLegend } from './modules/Legend';
@@ -507,7 +508,7 @@ const historyUrl = state ? `/states/${state}/${state}_history.json` : '/detailed
 const boundariesUrl = state ? `/states/${state}/${state}_district_boundaries.geojson` : null;
 
 // Init Map
-const map = createMap('map');
+const map = createMap('map', mapAttributions(state));
 
 
 // Initialize Hamburger Menu

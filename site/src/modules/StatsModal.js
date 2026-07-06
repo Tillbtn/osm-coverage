@@ -33,10 +33,10 @@ export class StatsModal {
         <div id="stats-modal" class="modal" style="display:none;">
             <div class="modal-content">
                 <span class="close-button">&times;</span>
-                <h2>Statistiken</h2>
+                <h2>Statistiken <a href="status.html" target="_blank" rel="noopener" title="Status der Datenquellen" style="float: right; margin: 4px 8px 0 0; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; color: #9ca3af; border: 1px solid #9ca3af; border-radius: 50%; font-size: 0.55em; font-weight: bold; font-style: italic; font-family: serif; text-decoration: none;">i</a></h2>
 
                 <div class="stats-section">
-                    <h3>Verlauf der Abdeckung</h3>
+                    <h3>Verlauf:</h3>
                     <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                         <label for="statsChartSelect">Anzeige für:</label>
                         <select id="statsChartSelect" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc;">

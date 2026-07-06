@@ -158,15 +158,7 @@ fetchLogs().then(() => {
     terminalOutput.scrollTop = terminalOutput.scrollHeight;
 });
 
-// Adaptive auto-refresh: 5s while a live log is present, 30s while it's missing
-// (e.g. the local dev server) so we don't spam 404s into the console.
-function scheduleLogPoll() {
-    setTimeout(async () => {
-        await fetchLogs();
-        scheduleLogPoll();
-    }, logPresent ? 5000 : 30000);
-}
-scheduleLogPoll();
+const interval = setInterval(fetchLogs, 86400);
 
 // Manual refresh
 refreshBtn.addEventListener('click', () => {
