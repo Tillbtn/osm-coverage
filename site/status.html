@@ -243,7 +243,11 @@
 </head>
 
 <body class="landing-page">
-    <div class="landing-container status-wrap" style="text-align: left;">
+    <!-- No .landing-container here: its width/padding rules would clash with
+         .status-wrap — in the production build the bundled stylesheet is
+         injected after this page's inline <style>, flipping the cascade order
+         relative to dev. -->
+    <div class="status-wrap">
         <header class="landing-header" style="text-align: left; padding-bottom: 0;">
             <h1>System-Status</h1>
             <p class="subtitle" style="color:#6b7280;">
