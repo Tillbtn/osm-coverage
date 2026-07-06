@@ -21,6 +21,23 @@ _GERMAN_MONTHS = {
     "oktober": "10", "november": "11", "dezember": "12",
 }
 
+
+def _he_filename_date(name):
+    """
+    Extract the HE Ausgabedatum ('YYYY-MM') from a download filename. Two formats:
+      "...-2026-01.txt"                     -> 2026-01   (current)
+      "...Ausgabedatum September 2025.zip"  -> 2025-09   (older)
+    Returns None if neither matches.
+    """
+    base = name.lower()
+    m = re.search(r"-(\d{4})-(\d{2})(?:\b|\()", base)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}"
+    m = re.search(r"ausgabedatum\s+([a-zäöü]+)\s+(\d{4})", base)
+    if m and m.group(1) in _GERMAN_MONTHS:
+        return f"{m.group(2)}-{_GERMAN_MONTHS[m.group(1)]}"
+    return None
+
 # Configuration
 DATA_DIR = "data"
 # Sentinel key in alkis_meta.json holding the state-wide ALKIS export date
@@ -452,12 +469,15 @@ def detect_alkis_date(state_name, alkis_source_dir):
                     return f"{m.group(1)}-{m.group(2)}-{m.group(3)}", "filename"
 
         elif s == "HE":
-            # zip name: "...Ausgabedatum September 2025.zip" -> 2025-09
-            for f in glob.glob(os.path.join(alkis_source_dir, "*.zip")) + glob.glob(os.path.join(parent, "*.zip")):
-                base = os.path.basename(f).lower()
-                m = re.search(r"ausgabedatum\s+([a-zäöü]+)\s+(\d{4})", base)
-                if m and m.group(1) in _GERMAN_MONTHS:
-                    return f"{m.group(2)}-{_GERMAN_MONTHS[m.group(1)]}", "filename"
+            # The date is in the filename. Prefer the .txt actually processed
+            # (process_he reads *.txt); fall back to the .zip.
+            for pattern in (os.path.join(alkis_source_dir, "*.txt"),
+                            os.path.join(alkis_source_dir, "*.zip"),
+                            os.path.join(parent, "*.zip")):
+                dates = [d for d in (_he_filename_date(os.path.basename(f))
+                                     for f in glob.glob(pattern)) if d]
+                if dates:
+                    return max(dates), "filename"
 
         elif s == "BE":
             # HKO_EPSG25833/info-be.txt metadata line: "Auslesedatum: 2026-03-23"
@@ -722,6 +742,7 @@ def process_rlp(directory):
     try:
         # Columns: nba;oid;qua;landschl;land;regbezschl;regbez;kreisschl;kreis;gmdschl;gmd;ottschl;ott;strschl;str;hnr;adz;zone;ostwert;nordwert
         df = pd.read_csv(csv_path, sep=';', dtype=str)
+        df.columns = df.columns.str.lower()
         
         df = df.dropna(subset=['str', 'hnr', 'ostwert', 'nordwert'])
         
@@ -1138,7 +1159,10 @@ def process_he(directory):
              df = None
              for enc in ['utf-8', 'latin1', 'cp1252']:
                  try:
-                     df = pd.read_csv(txt_path, sep=';', dtype=str, encoding=enc, on_bad_lines='skip')
+                     with open(txt_path, encoding=enc) as fh:
+                         header = fh.readline()
+                     sep = ';' if header.count(';') >= header.count(',') else ','
+                     df = pd.read_csv(txt_path, sep=sep, dtype=str, encoding=enc, on_bad_lines='skip')
                      break
                  except UnicodeDecodeError:
                      continue

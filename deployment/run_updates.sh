@@ -27,11 +27,6 @@ echo "----------------------------------------"
 
 echo "Checking for new data..."
 
-# Refresh the ALKIS freshness dashboard (site/public/alkis_status.json) every
-# cycle, independent of the OSM gate below — light HEAD/index probes only.
-echo "Refreshing ALKIS status dashboard..."
-python scripts/check_alkis_dates.py || echo "Warning: ALKIS status check failed, continuing..."
-
 # Check if update is needed
 python scripts/check_geofabrik_export_date.py
 CHECK_STATUS=$?
@@ -72,9 +67,13 @@ if [ $CHECK_STATUS -eq 0 ]; then
          cp "$f" "backups/${state_name}_history_$(date +%F).json"
     done
 
-    echo "Update complete. Exiting successfully."
-    exit 0
+    echo "Update complete."
 else
-    echo "No new data available. Exiting until next cron run."
-    exit 0
+    echo "No new data available until next cron run."
 fi
+
+# Refresh the ALKIS freshness dashboard
+echo "Refreshing ALKIS status dashboard..."
+python scripts/check_alkis_dates.py || echo "Warning: ALKIS status check failed."
+
+exit 0

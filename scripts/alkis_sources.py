@@ -250,7 +250,13 @@ def _hh_ckan_date(url, session=None, timeout=60):
 
 
 def _mv_atom_date(url, session=None, timeout=60):
-    """Newest <updated> among the ALKIS entries in the GeoPortal.MV Atom feed."""
+    """
+    Newest <updated> among MV's per-Landkreis ALKIS *address-data* entries in the
+    GeoPortal.MV Atom feed ("ALKIS / <Kreisname>"). Excludes the catalog/schema
+    ("ALKIS / Katalog-Download", "Katalogdaten") and topographic ("Topographie")
+    entries, which update on their own cadence and would otherwise overstate the
+    address-data stand.
+    """
     session = session or requests.Session()
     resp = session.get(url, timeout=timeout)
     resp.raise_for_status()
@@ -259,7 +265,10 @@ def _mv_atom_date(url, session=None, timeout=60):
     for entry in re.findall(r"<entry>(.*?)</entry>", text, re.S):
         title = re.search(r"<title>(.*?)</title>", entry, re.S)
         updated = re.search(r"<updated>(\d{4}-\d{2}-\d{2})", entry)
-        if title and updated and re.search(r"ALKIS", title.group(1), re.I):
+        if not (title and updated):
+            continue
+        t = title.group(1)
+        if re.search(r"ALKIS", t, re.I) and not re.search(r"Katalog|Topographie", t, re.I):
             dates.append(updated.group(1))
     return max(dates) if dates else None
 
