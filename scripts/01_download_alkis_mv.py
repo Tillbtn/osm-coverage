@@ -1,9 +1,14 @@
 import os
+import sys
 import requests
 import tqdm
 import csv
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
+
+# Download URL pattern is loaded from scripts/alkis_sources.py.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import alkis_sources
 
 # Configuration
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -13,8 +18,7 @@ CSV_FILE = os.path.join(DATA_DIR, "mv", "Gemeinde_Gemarkung_Kreis.csv")
 
 def generate_urls(csv_path):
     urls = []
-    # Base URL pattern
-    base_url = "https://www.geodaten-mv.de/dienste/alkis_nas_download?index=1&dataset=32538df8-6b74-4582-8591-c77e85fbf929&file={id}_SHP_{name}.zip"
+    base_url = alkis_sources.download_url("mv")
     
     # Store unique municipalities to avoid duplicates
     # Key: id_Gemeinde, Value: Gemeinde_Name (original)

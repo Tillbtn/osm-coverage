@@ -1,11 +1,16 @@
 import os
+import sys
 import requests
 import zipfile
 import shutil
 import tqdm
 
+# Download URL is loaded from scripts/alkis_sources.py.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import alkis_sources
+
 # Configuration
-DOWNLOAD_URL = "https://geobasis-rlp.de/data/hk/current/zip/HAUSKOORDINATEN_RP.zip"
+DOWNLOAD_URL = alkis_sources.download_url("rlp")
 DATA_DIR = "data"
 RLP_ALKIS_DIR = os.path.join(DATA_DIR, "rlp", "alkis")
 TARGET_DIR = os.path.join(RLP_ALKIS_DIR, "HAUSKOORDINATEN_RP")

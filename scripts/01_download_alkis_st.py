@@ -1,11 +1,16 @@
 import os
+import sys
 import requests
 import zipfile
 import shutil
 import tqdm
 
+# Download URL is loaded from scripts/alkis_sources.py.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import alkis_sources
+
 # Configuration
-DOWNLOAD_URL = "https://www.geodatenportal.sachsen-anhalt.de/gfds_webshare/download/LVermGeo/Geodatenportal/externedaten/GBIS_Gebaeude.zip"
+DOWNLOAD_URL = alkis_sources.download_url("st")
 DATA_DIR = "data/st/alkis"
 ZIP_FILENAME = "GBIS_Gebaeude.zip"
 

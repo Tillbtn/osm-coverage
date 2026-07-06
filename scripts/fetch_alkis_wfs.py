@@ -48,6 +48,12 @@ generate_alkis_id = _extract.generate_alkis_id
 expand_complex_addresses = _extract.expand_complex_addresses
 _write_alkis_meta = _extract.write_alkis_meta  # shared district-keyed sidecar writer
 
+# Read from ALKIS source registry.
+_SOURCES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alkis_sources.py")
+_sspec = importlib.util.spec_from_file_location("alkis_sources", _SOURCES_PATH)
+_alkis_sources = importlib.util.module_from_spec(_sspec)
+_sspec.loader.exec_module(_alkis_sources)
+
 
 # ---------------------------------------------------------------------------
 # WFS source configuration
@@ -80,29 +86,7 @@ _write_alkis_meta = _extract.write_alkis_meta  # shared district-keyed sidecar w
 #   city       : property holding the municipality / city          (optional)
 #   postcode   : property holding the postal code                  (optional)
 
-WFS_SOURCES = [
-    {
-        "key": "aachen",
-        "base_url": "https://geodienste.staedteregion-aachen.de/?MAP=gebaeudereferenzen.qgs",
-        "typename": "Gebaeudereferenzen_StaedteregionAachen",
-        "version": "1.1.0",
-        "count_param": "maxFeatures",
-        "srs": "EPSG:25832",
-        "page_size": 50000,
-        "state_dir": "nrw",
-        "state_label": "NRW",
-        "mode": "district",
-        "district": "Städteregion Aachen",
-        "date_field": "datum_auswertung",
-        "field_map": {
-            "street": "strasse_lage",
-            "hnr": "hsnr",
-            "hnr_suffix": "hsnrzus",
-            "city": "gmdname",
-        },
-        "extra_separators": ["/"],
-    },
-]
+WFS_SOURCES = _alkis_sources.wfs_sub_sources()
 
 
 # ---------------------------------------------------------------------------
@@ -404,40 +388,15 @@ def read_stored_alkis_date(source):
 
 def probe_alkis_date(source, session=None, timeout=60):
     """
-    Cheaply fetch a single feature to read its date_field without downloading 
-    the whole layer. The date is uniform per feed, so one feature is enough. 
-    Returns the date string, or None if unavailable.
+    Cheaply read a source's date_field via a single feature. Delegates to the
+    shared probe in alkis_sources.py; catches network errors so run_source falls
+    back to a full fetch rather than aborting.
     """
-    field = source.get("date_field")
-    if not field:
-        return None
-
-    session = session or requests.Session()
-    params = {
-        "service": "WFS",
-        "version": source.get("version", "1.1.0"),
-        "request": "GetFeature",
-        "typeName": source["typename"],
-        "srsName": source.get("srs", TARGET_CRS),
-        "outputFormat": "application/vnd.geo+json",
-        "startIndex": 0,
-        source.get("count_param", "maxFeatures"): 1,
-    }
     try:
-        resp = session.get(source["base_url"], params=params, timeout=timeout)
-        resp.raise_for_status()
-        try:
-            data = resp.json()
-        except json.JSONDecodeError:
-            data = json.load(io.BytesIO(resp.content))
+        return _alkis_sources.probe_wfs_date(source, session=session, timeout=timeout)
     except Exception as e:
         print(f"[{source['key']}] date probe failed ({e}); proceeding with full fetch.")
         return None
-
-    feats = data.get("features", [])
-    if not feats:
-        return None
-    return str((feats[0].get("properties") or {}).get(field) or "").strip() or None
 
 
 def run_source(source, dry_run=False, force=False):

@@ -382,11 +382,34 @@ def write_alkis_meta(state_dir, districts, alkis_date, source, state_wide=True):
     return meta_path
 
 
+_ALKIS_SOURCES_MOD = None
+
+
+def _load_alkis_sources():
+    """Lazily load scripts/alkis_sources.py (plain module name, load by path)."""
+    global _ALKIS_SOURCES_MOD
+    if _ALKIS_SOURCES_MOD is None:
+        import importlib.util
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alkis_sources.py")
+        spec = importlib.util.spec_from_file_location("alkis_sources", p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _ALKIS_SOURCES_MOD = mod
+    return _ALKIS_SOURCES_MOD
+
+
 def detect_alkis_date(state_name, alkis_source_dir):
     """
-    Return (date_str 'YYYY-MM-DD' or 'YYYY-MM', source_label) for the official
-    ALKIS export date, read from the source files. Returns (None, None) for
-    sources that do not embed a date (NRW, ST, MV, NDS, HH, BE).
+    Return (date_str 'YYYY-MM-DD' or 'YYYY-MM', source_label) for the ALKIS data
+    stand.
+
+    First tries a date embedded in the downloaded source files (offline,
+    authoritative): RLP (HK_OD-RP.csv), BB (gpkg 'aud' column), SN (filename),
+    HE (zip filename), BE (info-be.txt 'Auslesedatum'). If none is found, falls
+    back to the registry's remote freshness probe (scripts/alkis_sources.py) so
+    states whose files embed no date (NDS, NRW, ST, MV, HH) still record the
+    upstream stand they were just built from — the same source the freshness
+    dashboard reads. Returns (None, None) only when both fail.
     """
     s = state_name.upper()
     parent = os.path.dirname(alkis_source_dir)
@@ -435,8 +458,36 @@ def detect_alkis_date(state_name, alkis_source_dir):
                 m = re.search(r"ausgabedatum\s+([a-zäöü]+)\s+(\d{4})", base)
                 if m and m.group(1) in _GERMAN_MONTHS:
                     return f"{m.group(2)}-{_GERMAN_MONTHS[m.group(1)]}", "filename"
+
+        elif s == "BE":
+            # HKO_EPSG25833/info-be.txt metadata line: "Auslesedatum: 2026-03-23"
+            for info in glob.glob(os.path.join(alkis_source_dir, "**", "info-be.txt"), recursive=True):
+                for enc in ("utf-8", "latin1", "cp1252"):
+                    try:
+                        with open(info, "r", encoding=enc) as f:
+                            for line in f:
+                                if line.strip().lower().startswith("auslesedatum"):
+                                    m = re.search(r"(\d{4})-(\d{2})-(\d{2})", line)
+                                    if m:
+                                        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}", "metadata:info-be.txt"
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                break
     except Exception as e:
         print(f"[{state_name}] Could not detect ALKIS date: {e}")
+
+    # No file-embedded date: fall back to the upstream freshness probe (same
+    # source the dashboard uses). Best-effort — network failures leave it null.
+    try:
+        srcs = _load_alkis_sources()
+        key = state_name.lower()
+        if key in srcs.SOURCES and srcs.SOURCES[key].get("probe", "none") != "none":
+            date, _note = srcs.probe_remote_date(key)
+            if date:
+                return date, f"remote:{srcs.SOURCES[key]['probe']}"
+    except Exception as e:
+        print(f"[{state_name}] Remote ALKIS date probe failed: {e}")
 
     return None, None
 

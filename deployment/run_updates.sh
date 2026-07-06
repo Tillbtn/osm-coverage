@@ -27,6 +27,11 @@ echo "----------------------------------------"
 
 echo "Checking for new data..."
 
+# Refresh the ALKIS freshness dashboard (site/public/alkis_status.json) every
+# cycle, independent of the OSM gate below — light HEAD/index probes only.
+echo "Refreshing ALKIS status dashboard..."
+python scripts/check_alkis_dates.py || echo "Warning: ALKIS status check failed, continuing..."
+
 # Check if update is needed
 python scripts/check_geofabrik_export_date.py
 CHECK_STATUS=$?

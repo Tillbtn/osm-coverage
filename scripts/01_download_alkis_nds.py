@@ -1,13 +1,17 @@
 
 import os
+import sys
 import requests
 import json
 import tqdm
 from concurrent.futures import ThreadPoolExecutor
 
+# Download URL is loaded from scripts/alkis_sources.py.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import alkis_sources
 
 # Configuration
-GEOJSON_URL = "https://arcgis-geojson.s3.eu-de.cloud-object-storage.appdomain.cloud/alkis-vektor/lgln-opengeodata-alkis-vektor.geojson"
+GEOJSON_URL = alkis_sources.download_url("nds")
 DATA_DIR = "data"
 ALKIS_DIR = os.path.join(DATA_DIR, "nds", "alkis")
 

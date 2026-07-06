@@ -1,12 +1,17 @@
 import os
+import sys
 import requests
 import xml.etree.ElementTree as ET
 import tqdm
 from concurrent.futures import ThreadPoolExecutor
 
+# Download URL is loaded from scripts/alkis_sources.py.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import alkis_sources
+
 # Configuration
-BASE_URL = "https://www.opengeodata.nrw.de/produkte/geobasis/lk/akt/gru_vereinfacht_gpkg/"
-INDEX_URL = BASE_URL + "index.html" 
+BASE_URL = alkis_sources.download_url("nrw")
+INDEX_URL = BASE_URL + "index.html"
 DATA_DIR = "data"
 ALKIS_DIR = os.path.join(DATA_DIR, "nrw", "alkis")
 
