@@ -493,7 +493,7 @@ const stateFromUrl = params.get('state');
 const districtFromUrl = params.get('district');
 const state = stateFromUrl || document.body.dataset.state;
 
-const config = STATE_CONFIG[state] || { center: [51.16, 10.45], zoom: 6, name: "Deutschland" };
+const config = STATE_CONFIG[state] || { center: [51.16, 10.45], zoom: 7, name: "Deutschland" };
 
 // Update Page Title
 if (config.name) {
