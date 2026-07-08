@@ -101,6 +101,14 @@ async function fetchAlkisStatus() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
 
+        const remoteCell = (o) => {
+            let html = fmtDate(o.remote_date);
+            if (o.remote_date && o.remote_source) {
+                html += `<span class="cell-sub">Quelle: ${o.remote_source}</span>`;
+            }
+            return html;
+        };
+
         // "Verarbeitet": the ALKIS stand we hold, plus when it was processed.
         const processedCell = (o) => {
             let html = fmtDate(o.processed_date);
@@ -120,7 +128,7 @@ async function fetchAlkisStatus() {
                 const note = s.note ? `<span class="cell-note">${s.note}</span>` : '';
                 const out = [`<tr>
                     <td class="state">${link}${note}</td>
-                    <td>${fmtDate(s.remote_date)}</td>
+                    <td>${remoteCell(s)}</td>
                     <td>${processedCell(s)}</td>
                     <td>${fmtDate(s.osm_date)}</td>
                     <td>${fmtDateTime(s.compared_at)}</td>
@@ -132,7 +140,7 @@ async function fetchAlkisStatus() {
                         ? `<span class="cadence">${sub.cadence === 'daily' ? 'täglich' : sub.cadence}</span>` : '';
                     out.push(`<tr class="sub-row">
                         <td class="state"><span class="sub-arrow">↳</span> ${sub.label}${cadence}</td>
-                        <td>${fmtDate(sub.remote_date)}</td>
+                        <td>${remoteCell(sub)}</td>
                         <td>${processedCell(sub)}</td>
                         <td>${DASH}</td>
                         <td>${DASH}</td>

@@ -115,7 +115,7 @@ SOURCES = {
         # The index timestamp is the build date of the product we ingest
         # (gru_vereinfacht_gpkg). NRW also offers a newer Gebäudereferenzen feed
         # via ogc-api.nrw.de/gebref — a possible future migration.
-        "note": "Landesweit alle quartalsweise; Städteregion Aachen täglich per WFS",
+        "note": "Landesweites Update quartalsweise",
         "sub_sources": [_AACHEN_WFS],
     },
     "rlp": {
@@ -135,13 +135,13 @@ SOURCES = {
         "automated": True, "source_type": "download_service",
         "probe": "mv_atom", "url": _MV_ATOM_URL,
         "download": {"method": "nas_download_service", "url": _MV_DOWNLOAD_PATTERN},
-        "note": "Fortlaufend je Landkreis aktualisiert (GeoPortal.MV Atom-Feed)",
+        "note": "Fortlaufend je Landkreis aktualisiert",
     },
     "hh": {
         "automated": False, "source_type": "portal",
         "probe": "hh_ckan", "url": _HH_CKAN_URL,
         "download": {"method": "manual", "url": "https://suche.transparenz.hamburg.de/dataset/alkis-adressen-hamburg26"},
-        "note": "transparenz.hamburg.de; Update quartalsweise",
+        "note": "Transparenzportal Hamburg; Update quartalsweise",
     },
     "he": {
         "automated": False, "source_type": "portal",
@@ -150,19 +150,19 @@ SOURCES = {
                 "ViewDownloadcenter-Start?path=Liegenschaftskataster/"
                 "Hauskoordinaten%20ohne%20Postalische%20Angaben%20(txt)"),
         "download": {"method": "manual", "url": "https://gds.hessen.de"},
-        "note": "HLBG Downloadcenter; Datum steht auf der Seite, aber automatisch auslesbar",
+        "note": "HLBG Downloadcenter; Datum steht auf der Seite, aber nicht automatisch auslesbar",
     },
     "bb": {
         "automated": False, "source_type": "order",
         "probe": "none", "url": "https://geobroker.geobasis-bb.de",
         "download": {"method": "manual", "url": "https://geobroker.geobasis-bb.de"},
-        "note": "Bestellung über Geobroker nötig",
+        "note": "manuelle Bestellung über Geobroker nötig",
     },
     "be": {
         "automated": False, "source_type": "portal",
         "probe": "none", "url": "https://gdi.berlin.de/geonetwork",
         "download": {"method": "manual", "url": "https://gdi.berlin.de/geonetwork"},
-        "note": "GDI Berlin; Stand in info-be.txt (Auslesedatum) nach Entpacken, manuell",
+        "note": "GDI Berlin; Stand in info-be.txt, manueller Download nötig",
     },
     "sn": {
         "automated": False, "source_type": "portal",
@@ -186,6 +186,46 @@ def wfs_sub_sources():
             if sub.get("type") == "wfs":
                 out.append(sub)
     return out
+
+
+# rigin of each probe strategy, shown on the dashboard so it is
+# clear *where* an "upstream" date comes from
+PROBE_LABELS = {
+    "http_last_modified": "HTTP Last-Modified",
+    "nrw_index": "opengeodata-Index (timestamp)",
+    "nds_metadata": "GeoSJON-Metadaten",
+    "hh_ckan": "Transparenzportal (CKAN)",
+    "mv_atom": "GeoPortal.MV Atom-Feed",
+    "sn_changelog": "changelog.xml (HK/HU)",
+    "st_page": "Stand Gebäudereferenzen",
+    "wfs_field": "WFS (datum_auswertung)",
+    "none": None,
+}
+
+
+def probe_label(probe):
+    """Display label for a probe strategy (the origin of a remote/upstream date)."""
+    return PROBE_LABELS.get(probe)
+
+
+def describe_meta_source(src):
+    """
+    Turn the `source` string stored in alkis_meta.json (written by 02 /
+    fetch_alkis_wfs) into a readable origin for the 'Verarbeitet' date.
+    """
+    if not src:
+        return None
+    if src.startswith("remote:"):
+        probe = src.split(":", 1)[1]
+        label = PROBE_LABELS.get(probe) or probe
+        return f"{label} (beim Abruf)"
+    if src.startswith("wfs:"):
+        return f"WFS {src.split(':', 1)[1]}"
+    if src.startswith("metadata:"):
+        return src.split(":", 1)[1]
+    if src.startswith("column:"):
+        return f"GPKG-Spalte „{src.split(':', 1)[1]}“"
+    return {"filename": "Dateiname", "manual": "manuell"}.get(src, src)
 
 
 def _last_modified_date(url, verify=True, session=None, timeout=30):
@@ -274,7 +314,11 @@ def _mv_atom_date(url, session=None, timeout=60):
 
 
 def _sn_changelog_date(url, session=None, timeout=60):
-    """Newest changelog entry whose title mentions HK (Hauskoordinaten)."""
+    """
+    Newest Hauskoordinaten data stand from the SN changelog. The real date
+    is the "Stand DD.MM.YYYY" in the entry <summary> — NOT <updated>, which is
+    when the changelog note was posted.
+    """
     session = session or requests.Session()
     resp = session.get(url, timeout=timeout)
     resp.raise_for_status()
@@ -282,9 +326,12 @@ def _sn_changelog_date(url, session=None, timeout=60):
     dates = []
     for entry in re.findall(r"<entry>(.*?)</entry>", text, re.S):
         title = re.search(r"<title>(.*?)</title>", entry, re.S)
-        date = re.search(r"(\d{4}-\d{2}-\d{2})", entry)
-        if title and date and re.search(r"\bHK\b|Hauskoord", title.group(1), re.I):
-            dates.append(date.group(1))
+        if not (title and re.search(r"\bHK\b|Hauskoord", title.group(1), re.I)):
+            continue
+        summary = re.search(r"<summary>(.*?)</summary>", entry, re.S)
+        stand = re.search(r"Stand\s+(\d{2})\.(\d{2})\.(\d{4})", summary.group(1)) if summary else None
+        if stand:
+            dates.append(f"{stand.group(3)}-{stand.group(2)}-{stand.group(1)}")
     return max(dates) if dates else None
 
 

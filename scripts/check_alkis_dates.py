@@ -36,6 +36,8 @@ SOURCES = _sources.SOURCES
 STATE_NAMES = _sources.STATE_NAMES
 probe_remote_date = _sources.probe_remote_date
 probe_wfs_date = _sources.probe_wfs_date
+probe_label = _sources.probe_label
+describe_meta_source = _sources.describe_meta_source
 
 
 def read_processed(state):
@@ -49,21 +51,21 @@ def read_processed(state):
     except Exception:
         return None, None
     entry = meta.get(STATE_META_KEY) or {}
-    return entry.get("alkis_date"), entry.get("fetched_at")
+    return entry.get("alkis_date"), entry.get("fetched_at"), entry.get("source")
 
 
 def read_district_processed(state, district):
-    """(alkis_date, fetched_at) for one district's alkis_meta entry (sub-sources)."""
+    """(alkis_date, fetched_at, source) for one district's alkis_meta entry."""
     meta_path = os.path.join(DATA_DIR, state, "alkis_meta.json")
     if not os.path.exists(meta_path):
-        return None, None
+        return None, None, None
     try:
         with open(meta_path, "r", encoding="utf-8") as f:
             meta = json.load(f)
     except Exception:
-        return None, None
+        return None, None, None
     entry = meta.get(district) or {}
-    return entry.get("alkis_date"), entry.get("fetched_at")
+    return entry.get("alkis_date"), entry.get("fetched_at"), entry.get("source")
 
 
 def probe_sub_sources(state, src, session):
@@ -77,7 +79,7 @@ def probe_sub_sources(state, src, session):
         except Exception as e:
             remote = None
             print(f"[{state}/{sub.get('key')}] WFS probe failed: {e}")
-        processed, processed_at = read_district_processed(state, sub.get("district"))
+        processed, processed_at, processed_src = read_district_processed(state, sub.get("district"))
         subs.append({
             "key": sub.get("key"),
             "label": sub.get("label") or sub.get("district"),
@@ -85,8 +87,10 @@ def probe_sub_sources(state, src, session):
             "cadence": sub.get("cadence"),
             "automated": True,
             "remote_date": remote,
+            "remote_source": probe_label(sub.get("probe")),
             "processed_date": processed,
             "processed_at": processed_at,
+            "processed_source": describe_meta_source(processed_src),
             "update_available": is_newer(remote, processed),
         })
         print(f"  [{state}/{sub.get('key')}] processed={processed or '-'} "
@@ -141,7 +145,7 @@ def build(states):
     out = {}
     for state in states:
         src = SOURCES[state]
-        processed_date, processed_at = read_processed(state)
+        processed_date, processed_at, processed_src = read_processed(state)
         remote_date, note = probe_remote_date(state, session=session)
         osm_date, compared_at = read_osm_and_comparison(state)
         update = is_newer(remote_date, processed_date)
@@ -159,7 +163,9 @@ def build(states):
             "source_url": src.get("url"),
             "processed_date": processed_date,
             "processed_at": processed_at,
+            "processed_source": describe_meta_source(processed_src),
             "remote_date": remote_date,
+            "remote_source": probe_label(src.get("probe")),
             "osm_date": osm_date,
             "compared_at": compared_at,
             "update_available": update,
