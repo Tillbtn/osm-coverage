@@ -95,7 +95,30 @@ function shouldHideFeature(feature) {
     return false;
 }
 
+// Housenumber label shown while hovering an address point. Below this zoom the
+// points sit too close together for the labels to be readable.
+const HNR_TOOLTIP_MIN_ZOOM = 16;
+
+const hnrTooltip = L.tooltip({
+    direction: 'top',
+    offset: [0, -8],
+    className: 'hnr-tooltip',
+    opacity: 0.95
+});
+
+function showHnrTooltip(layer) {
+    if (!layer || map.getZoom() < HNR_TOOLTIP_MIN_ZOOM) return;
+    const props = layer.feature ? layer.feature.properties : null;
+    if (!props || !isValid(props.housenumber)) return;
+    hnrTooltip.setLatLng(layer.getLatLng()).setContent(String(props.housenumber)).openOn(map);
+}
+
+function hideHnrTooltip() {
+    map.closeTooltip(hnrTooltip);
+}
+
 function loadDistrict(name, preserveView = false) {
+    hideHnrTooltip();
     if (currentLayer) map.removeLayer(currentLayer);
     currentLayer = null;
     currentDistrictName = name;
@@ -452,6 +475,11 @@ function loadDistrict(name, preserveView = false) {
                     }
                 }
             });
+
+            // Handled on the group so a single listener covers all points.
+            currentLayer.on('mouseover', (e) => showHnrTooltip(e.propagatedFrom || e.layer));
+            currentLayer.on('mouseout', hideHnrTooltip);
+
             currentLayer.addTo(map);
             if (data.features.length > 0 && !preserveView) {
                 map.fitBounds(currentLayer.getBounds());
@@ -509,6 +537,11 @@ const boundariesUrl = state ? `/states/${state}/${state}_district_boundaries.geo
 
 // Init Map
 const map = createMap('map', mapAttributions(state));
+
+map.on('zoomend', () => {
+    if (map.getZoom() < HNR_TOOLTIP_MIN_ZOOM) hideHnrTooltip();
+});
+map.on('popupopen', hideHnrTooltip);
 
 
 // Initialize Hamburger Menu
@@ -1143,6 +1176,7 @@ createLegend(map, visibilityState, (key, isChecked) => {
 
     // Re-render layer if exist
     if (currentLayer && currentGeoJSONData) {
+        hideHnrTooltip();
         currentLayer.clearLayers();
         currentLayer.addData(currentGeoJSONData);
     }
