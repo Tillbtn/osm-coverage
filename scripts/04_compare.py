@@ -538,6 +538,25 @@ def main():
         if not os.path.exists(osm_path):
             print(f"[{state}] OSM file not found: {osm_path}. Skipping.")
             continue
+
+        # Consistency guard: the OSM snapshot date is read from the PBF header, but
+        # the addresses come from osm.parquet. If 03_import_osm.py did not finish
+        # for this state (download failed, corrupt PBF deleted, extraction aborted)
+        # the two diverge and we would label stale data with a new timestamp.
+        if not os.path.exists(pbf_path):
+            if not args.force:
+                print(f"[{state}] PBF not found: {pbf_path}. Cannot determine the OSM snapshot date; "
+                      f"skipping (re-run 03_import_osm.py, or use --force to label with today's date).")
+                found_any = True
+                continue
+            print(f"[{state}] Warning: PBF not found; --force given, history entry will be dated today.")
+        elif os.path.getmtime(osm_path) < os.path.getmtime(pbf_path):
+            if not args.force:
+                print(f"[{state}] osm.parquet is older than the PBF — 03_import_osm.py did not finish for this state. "
+                      f"Skipping to avoid labelling stale OSM data with the new PBF timestamp (--force overrides).")
+                found_any = True
+                continue
+            print(f"[{state}] Warning: osm.parquet is older than the PBF; --force given, proceeding anyway.")
             
         # Optimization: Compare PBF timestamp with the latest history entry
         if not args.force and os.path.exists(history_file) and os.path.exists(pbf_path):

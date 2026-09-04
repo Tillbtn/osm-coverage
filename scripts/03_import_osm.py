@@ -10,6 +10,8 @@ import tqdm
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone
 import gc
+import hashlib
+import re
 
 # Configuration
 DATA_DIR = "data"
@@ -151,16 +153,58 @@ class AddressHandler(osmium.SimpleHandler):
              pass
 
 
+# Result codes of download_pbf()
+DOWNLOADED = "downloaded"   # a new, verified PBF is in place
+UNCHANGED = "unchanged"     # local PBF is at least as new as the remote one
+FAILED = "failed"           # download/verification failed; previous PBF (if any) kept
+
+
+def _fetch_remote_md5(url, headers):
+    """Geofabrik publishes '<file>.md5' next to every PBF. Returns the hex digest or None."""
+    try:
+        r = requests.get(url + ".md5", headers=headers, timeout=30)
+        if r.status_code != 200:
+            return None
+        token = r.text.strip().split()[0].lower()
+        if re.fullmatch(r"[0-9a-f]{32}", token):
+            return token
+        print(f"  Warning: unexpected checksum file content: {r.text.strip()[:80]!r}")
+    except Exception as e:
+        print(f"  Warning: could not fetch checksum {url}.md5: {e}")
+    return None
+
+
+def _file_md5(path):
+    h = hashlib.md5()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _remove_quietly(path):
+    try:
+        if os.path.lexists(path):
+            os.remove(path)
+    except OSError as e:
+        print(f"  Warning: could not remove {path}: {e}")
+
+
 def download_pbf(url, local_path):
+    """Download the PBF if the remote copy is newer.
+
+    The file is streamed to '<local_path>.part', verified against Content-Length
+    and Geofabrik's published .md5, and only then moved into place. A broken
+    connection therefore never leaves a truncated PBF at local_path; the previous
+    complete file (if any) stays untouched.
+    """
     print(f"Checking {url}...")
 
-    # headers={
-    #     "Cache-Control": "no-cache",
-    #     "Pragma": "no-cache"
-    # }
+    part_path = local_path + ".part"
+    _remove_quietly(part_path)  # leftover from a crashed run
+
     try:
         head_response = requests.head(url, allow_redirects=True, timeout=30)
-        # head_response = requests.head(url, allow_redirects=True, headers=headers, timeout=30)
         head_response.raise_for_status()
         last_modified = head_response.headers.get("Last-Modified")
 
@@ -168,27 +212,60 @@ def download_pbf(url, local_path):
             remote_time = parsedate_to_datetime(last_modified)
             local_time = datetime.fromtimestamp(os.path.getmtime(local_path), tz=timezone.utc)
             
-            # Allow 1 hour buffer or exact match
             # If local is newer or same, we skip.
             if remote_time <= local_time:
                 print(f"  Local file is up-to-date (Remote: {remote_time}, Local: {local_time}). Skipping download.")
-                return False
+                return UNCHANGED
 
     except Exception as e:
         print(f"Warning: Could not check timestamp: {e}. Proceeding with download attempt.")
 
     print(f"Downloading {url} to {local_path}...")
-    with requests.get(url, stream=True, timeout=30) as r:
-    # with requests.get(url, stream=True, headers=headers, timeout=30) as r:
-        r.raise_for_status()
-        total_size = int(r.headers.get('content-length', 0))
-        block_size = 8192
-        with open(local_path, 'wb') as f, tqdm.tqdm(total=total_size, unit='iB', unit_scale=True, desc=f"DL {url.split('/')[-1]}", position=1, leave=False, disable=not sys.stdout.isatty()) as t:
-            for chunk in r.iter_content(chunk_size=block_size):
-                t.update(len(chunk))
-                f.write(chunk)
-    print("Download complete.")
-    return True
+    try:
+        with requests.get(url, stream=True, timeout=30) as r:
+            r.raise_for_status()
+            total_size = int(r.headers.get('content-length', 0))
+            received = 0
+            block_size = 8192
+            with open(part_path, 'wb') as f, tqdm.tqdm(total=total_size, unit='iB', unit_scale=True, desc=f"DL {url.split('/')[-1]}", position=1, leave=False, disable=not sys.stdout.isatty()) as t:
+                for chunk in r.iter_content(chunk_size=block_size):
+                    t.update(len(chunk))
+                    f.write(chunk)
+                    received += len(chunk)
+
+        # Verification 1: byte count (when the server announced one)
+        if total_size and received != total_size:
+            raise IOError(f"incomplete download: {received} of {total_size} bytes received")
+
+        # Verification 2: Geofabrik's published checksum (when available)
+        expected_md5 = _fetch_remote_md5(url, {})
+        if expected_md5:
+            actual_md5 = _file_md5(part_path)
+            if actual_md5 != expected_md5:
+                raise IOError(f"checksum mismatch: got {actual_md5}, expected {expected_md5}")
+            print(f"  Checksum OK ({received} bytes).")
+        else:
+            print(f"  No checksum published; size check passed ({received} bytes).")
+
+        os.replace(part_path, local_path)
+        print("Download complete.")
+        return DOWNLOADED
+    except Exception as e:
+        _remove_quietly(part_path)
+        print(f"Failed to download {url}: {e}")
+        if os.path.exists(local_path):
+            print(f"  Keeping previous PBF {local_path}.")
+        return FAILED
+
+
+# Messages osmium produces when a PBF is truncated or otherwise unreadable.
+_CORRUPT_PBF_MARKERS = ("pbf error", "eof", "uncompress", "invalid", "blob", "corrupt", "checksum", "truncat")
+
+
+def looks_like_corrupt_pbf(exc):
+    msg = str(exc).lower()
+    return isinstance(exc, RuntimeError) and any(m in msg for m in _CORRUPT_PBF_MARKERS)
+
 
 def process_state(state_key, config):
     state_dir = os.path.join(DATA_DIR, state_key)
@@ -222,16 +299,23 @@ def process_state(state_key, config):
                     except Exception as e:
                         print(f"[{state_key}] Failed to symlink PBF: {e}. Copying instead...")
                         shutil.copy2(bb_pbf_path, pbf_path)
-            return
+            return True
     
-    downloaded = download_pbf(config["pbf_url"], pbf_path)
+    status = download_pbf(config["pbf_url"], pbf_path)
+    failed = status == FAILED
+
+    if failed:
+        if not os.path.exists(pbf_path):
+            print(f"[{state_key}] Download failed and no previous PBF exists. Skipping.")
+            return False
+        print(f"[{state_key}] Download failed; continuing with the previous PBF.")
     
-    if not downloaded and os.path.exists(output_parquet):
+    if status != DOWNLOADED and os.path.exists(output_parquet):
         pbf_time = os.path.getmtime(pbf_path)
         parq_time = os.path.getmtime(output_parquet)
         if parq_time > pbf_time:
             print(f"[{state_key}] Parquet is newer than PBF. Skipping processing.")
-            return
+            return not failed
 
     print(f"[{state_key}] Extracting addresses from PBF in chunks of {CHUNK_SIZE}...")
     handler = AddressHandler(state_key=state_key)
@@ -259,13 +343,16 @@ def process_state(state_key, config):
         handler.flush_buffer()
     except Exception as e:
         print(f"[{state_key}] Error processing PBF: {e}")
-        return
+        if looks_like_corrupt_pbf(e) and os.path.isfile(pbf_path) and not os.path.islink(pbf_path):
+            print(f"[{state_key}] PBF appears to be corrupt; deleting {pbf_path} so the next run re-downloads it.")
+            _remove_quietly(pbf_path)
+        return False
     
     handler.pbar.close()
     
     if not handler.chunks:
         print(f"[{state_key}] No addresses found.")
-        return
+        return False
         
     print(f"[{state_key}] Concatenating chunks...")
     full_gdf = pd.concat(handler.chunks, ignore_index=True)
@@ -284,13 +371,21 @@ def process_state(state_key, config):
     
     full_gdf.to_parquet(output_parquet)
     print(f"[{state_key}] Saved to {output_parquet}")
+    return not failed
 
 
 def main():
     os.makedirs(DATA_DIR, exist_ok=True)
     
+    failed_states = []
     for state_key, config in STATES.items():
-        process_state(state_key, config)
+        if not process_state(state_key, config):
+            failed_states.append(state_key)
+
+    if failed_states:
+        print(f"All processing complete. FAILED states: {', '.join(failed_states)}")
+        sys.exit(1)
+    print("All processing complete.")
 
 if __name__ == "__main__":
     main()
