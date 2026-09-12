@@ -92,163 +92,156 @@ def apply_corrections(alkis_df, corrections_file, state):
         
     count = 0
 
+    # Pre-compute indices for fast lookups
+    alkis_id_series = None
+    if any("alkis_id" in c or "reference_alkis_id" in c for c in corrections):
+        alkis_id_series = pd.Series(alkis_df.index, index=alkis_df['alkis_id'])
+
+    street_indices = None
+    unique_streets = None
+    if any(c.get("from_street") or c.get("replace_in_street") for c in corrections):
+        street_indices = alkis_df.groupby('street').indices
+        unique_streets = pd.Series(list(street_indices.keys()))
+
+    # Track updates to avoid memory fragmentation from repeated .loc assignments
+    update_orig_street = {}
+    update_orig_hnr = {}
+    update_official = []
+    update_type = {}
+    update_comment = {}
+    update_street = {}
+    update_hnr = {}
+    update_replace = {} # list of (idx, replace_in, replace_with, tag, comment)
+
     for corr in tqdm.tqdm(corrections, desc=f"[{state}] Applying Corrections", ascii=True, disable=not sys.stdout.isatty()):
         from_street = corr.get("from_street")
         replace_in_street = corr.get("replace_in_street")
-        tag = corr.get("tag", corr.get("type", "corrected")) # Allow custom tag or type from JSON, default to "corrected"
+        tag = corr.get("tag", corr.get("type", "corrected"))
         comment = corr.get("comment", None)
         official_report = corr.get("official_report", False)
-        if official_report:
-             official_report = True
         
-        # Check for ID-based correction first
+        target_indices = []
+
+        # 1. ID-based correction
         if "alkis_id" in corr:
-            mask = alkis_df['alkis_id'] == corr["alkis_id"]
-            
-            if not mask.any():
-                continue
+            a_id = corr["alkis_id"]
+            if a_id in alkis_id_series:
+                res = alkis_id_series[a_id]
+                target_indices = res.tolist() if isinstance(res, pd.Series) else [res]
                 
-            rows_affected = mask.sum()
-            count += rows_affected
-            
-            # Save original values if needed (for first time correction)
-            mask_orig_street_nan = mask & alkis_df['original_street'].isna()
-            if mask_orig_street_nan.any():
-                 alkis_df.loc[mask_orig_street_nan, 'original_street'] = alkis_df.loc[mask_orig_street_nan, 'street']
-
-            mask_orig_hnr_nan = mask & alkis_df['original_housenumber'].isna()
-            if mask_orig_hnr_nan.any():
-                 alkis_df.loc[mask_orig_hnr_nan, 'original_housenumber'] = alkis_df.loc[mask_orig_hnr_nan, 'housenumber']
-            
-            # Apply changes
-            if official_report:
-                 alkis_df.loc[mask, 'official_report'] = True
-
-            if corr.get("ignore"):
-                alkis_df.loc[mask, 'correction_type'] = 'ignored'
-                if comment:
-                    alkis_df.loc[mask, 'correction_comment'] = comment
-            elif corr.get("already_mapped"):
-                 alkis_df.loc[mask, 'correction_type'] = 'already_mapped'
-                 if comment:
-                    alkis_df.loc[mask, 'correction_comment'] = comment
-            else:
-                if "to_street" in corr:
-                    alkis_df.loc[mask, 'street'] = corr["to_street"]
-                    alkis_df.loc[mask, 'correction_type'] = tag
-                    if comment:
-                        alkis_df.loc[mask, 'correction_comment'] = comment
-                    
-                if "to_housenumber" in corr:
-                    alkis_df.loc[mask, 'housenumber'] = corr["to_housenumber"]
-                    alkis_df.loc[mask, 'correction_type'] = tag
-                    if comment:
-                        alkis_df.loc[mask, 'correction_comment'] = comment
-                    
+        # 2. from_street correction
         elif from_street:
-            mask = alkis_df['street'] == from_street
-            
-            if "city" in corr:
-                # map city to district if column exists
-                if 'district' in alkis_df.columns:
-                     mask &= (alkis_df['district'] == corr["city"])
-            
-            if "from_housenumber" in corr:
-                 mask &= (alkis_df['housenumber'] == corr["from_housenumber"])
-            
-            # Radius-based filtering
-            if "reference_alkis_id" in corr:
-                 ref_id = corr["reference_alkis_id"]
-                 ref_row = alkis_df[alkis_df['alkis_id'] == ref_id]
-                 if not ref_row.empty:
-                     ref_geom = ref_row.iloc[0].geometry
-                     # Calculate distance to reference point for ALL candidates
-                     candidate_indices = alkis_df[mask].index
-                     if not candidate_indices.empty:
-                         candidates = alkis_df.loc[candidate_indices]
-                         max_dist = corr.get("max_distance", 2000)
-                         if candidates.crs and candidates.crs.is_geographic:
-                             dists = candidates.geometry.distance(ref_geom)
-                             mask &= (dists < (max_dist / 111320)) # degrees
-                         else:
-                             dists = candidates.geometry.distance(ref_geom)
-                             mask &= (dists <= max_dist) # meters
+            if from_street in street_indices:
+                base_idx = street_indices[from_street]
+                if "city" in corr or "from_housenumber" in corr or "reference_alkis_id" in corr:
+                    subset = alkis_df.iloc[base_idx]
+                    mask = pd.Series(True, index=subset.index)
+                    if "city" in corr and 'district' in subset.columns:
+                        mask &= (subset['district'] == corr["city"])
+                    if "from_housenumber" in corr:
+                        mask &= (subset['housenumber'] == corr["from_housenumber"])
 
-            if not mask.any():
-                continue
+                    if "reference_alkis_id" in corr:
+                        ref_id = corr["reference_alkis_id"]
+                        if alkis_id_series is not None and ref_id in alkis_id_series:
+                            r_res = alkis_id_series[ref_id]
+                            ref_idx = r_res.iloc[0] if isinstance(r_res, pd.Series) else r_res
+                            ref_geom = alkis_df.at[ref_idx, 'geometry']
+                            candidates = subset.loc[mask]
+                            max_dist = corr.get("max_distance", 2000)
+                            if candidates.crs and candidates.crs.is_geographic:
+                                dists = candidates.geometry.distance(ref_geom)
+                                mask &= (dists < (max_dist / 111320))
+                            else:
+                                dists = candidates.geometry.distance(ref_geom)
+                                mask &= (dists <= max_dist)
+                        else:
+                            mask &= False
+
+                    target_indices = subset.index[mask].tolist()
+                else:
+                    # groupby().indices yields positional indices; the updates
+                    # below are label-based, and the two only coincide while the
+                    # frame carries a RangeIndex (not the case after the
+                    # --district filter).
+                    target_indices = alkis_df.index[base_idx].tolist()
+
+        # 3. replace_in_street correction
+        elif replace_in_street:
+            match_mask = unique_streets.astype(str).str.contains(replace_in_street, regex=False)
+            if match_mask.any():
+                matched_strs = unique_streets[match_mask].tolist()
+                base_idx = []
+                for ms in matched_strs:
+                    base_idx.extend(street_indices[ms])
+
+                if base_idx:
+                    if "city" in corr and 'district' in alkis_df.columns:
+                        subset = alkis_df.iloc[base_idx]
+                        mask = (subset['district'] == corr["city"])
+                        target_indices = subset.index[mask].tolist()
+                    else:
+                        target_indices = alkis_df.index[base_idx].tolist()
+
+        if not target_indices:
+            continue
+            
+        count += len(target_indices)
+
+        # Collect updates
+        for idx in target_indices:
+            # Originals
+            if pd.isna(alkis_df.at[idx, 'original_street']) and idx not in update_orig_street:
+                update_orig_street[idx] = alkis_df.at[idx, 'street']
+            if pd.isna(alkis_df.at[idx, 'original_housenumber']) and idx not in update_orig_hnr:
+                update_orig_hnr[idx] = alkis_df.at[idx, 'housenumber']
                 
-            rows_affected = mask.sum()
-            
-            # Save original street for affected rows where it's not set yet
-            mask_no_orig = mask & alkis_df['original_street'].isna()
-            if mask_no_orig.any():
-                 alkis_df.loc[mask_no_orig, 'original_street'] = alkis_df.loc[mask_no_orig, 'street']
-
-            mask_orig_hnr_nan = mask & alkis_df['original_housenumber'].isna()
-            if mask_orig_hnr_nan.any():
-                 alkis_df.loc[mask_orig_hnr_nan, 'original_housenumber'] = alkis_df.loc[mask_orig_hnr_nan, 'housenumber']
-            
-            count += rows_affected
-            
-            # Apply changes
+            # Official report
             if official_report:
-                 alkis_df.loc[mask, 'official_report'] = True
+                update_official.append(idx)
 
+            # Values
             if corr.get("ignore"):
-                alkis_df.loc[mask, 'correction_type'] = 'ignored'
-                if comment:
-                    alkis_df.loc[mask, 'correction_comment'] = comment
+                update_type[idx] = 'ignored'
+                if comment: update_comment[idx] = comment
             elif corr.get("already_mapped"):
-                 alkis_df.loc[mask, 'correction_type'] = 'already_mapped'
-                 if comment:
-                    alkis_df.loc[mask, 'correction_comment'] = comment
+                update_type[idx] = 'already_mapped'
+                if comment: update_comment[idx] = comment
             else:
                 if "to_street" in corr:
-                    alkis_df.loc[mask, 'street'] = corr["to_street"]
-                    alkis_df.loc[mask, 'correction_type'] = tag
-                    if comment:
-                        alkis_df.loc[mask, 'correction_comment'] = comment
-                
+                    update_street[idx] = corr["to_street"]
+                    update_type[idx] = tag
+                    if comment: update_comment[idx] = comment
                 if "to_housenumber" in corr:
-                    alkis_df.loc[mask, 'housenumber'] = corr["to_housenumber"]
-                    alkis_df.loc[mask, 'correction_type'] = tag
-                    if comment:
-                        alkis_df.loc[mask, 'correction_comment'] = comment
-
-        elif replace_in_street:
-            replace_with = corr.get("replace_with", "")
-            mask = alkis_df['street'].astype(str).str.contains(replace_in_street, regex=False)
-            
-            if "city" in corr:
-                if 'district' in alkis_df.columns:
-                     mask &= (alkis_df['district'] == corr["city"])
-            
-            if mask.any():
-                rows_affected = mask.sum()
+                    update_hnr[idx] = corr["to_housenumber"]
+                    update_type[idx] = tag
+                    if comment: update_comment[idx] = comment
                 
-                # Save original street
-                mask_no_orig = mask & alkis_df['original_street'].isna()
-                if mask_no_orig.any():
-                     alkis_df.loc[mask_no_orig, 'original_street'] = alkis_df.loc[mask_no_orig, 'street']
-                
-                count += rows_affected
-                count += rows_affected
-                if official_report:
-                     alkis_df.loc[mask, 'official_report'] = True
+                # Replace logic
+                if replace_in_street and not "to_street" in corr:
+                    replace_with = corr.get("replace_with", "")
+                    # Will be applied after batch updates
+                    if idx not in update_replace:
+                        update_replace[idx] = []
+                    update_replace[idx].append((replace_in_street, replace_with, tag, comment))
 
-                if corr.get("ignore"):
-                     alkis_df.loc[mask, 'correction_type'] = 'ignored'
-                     if comment:
-                         alkis_df.loc[mask, 'correction_comment'] = comment
-                elif corr.get("already_mapped"):
-                     alkis_df.loc[mask, 'correction_type'] = 'already_mapped'
-                     if comment:
-                         alkis_df.loc[mask, 'correction_comment'] = comment
-                else: 
-                     alkis_df.loc[mask, 'street'] = alkis_df.loc[mask, 'street'].str.replace(replace_in_street, replace_with, regex=False)
-                     alkis_df.loc[mask, 'correction_type'] = tag
-                     if comment:
-                        alkis_df.loc[mask, 'correction_comment'] = comment
+    # Apply batch updates to avoid fragmentation
+    if update_orig_street: alkis_df.loc[list(update_orig_street.keys()), 'original_street'] = list(update_orig_street.values())
+    if update_orig_hnr: alkis_df.loc[list(update_orig_hnr.keys()), 'original_housenumber'] = list(update_orig_hnr.values())
+    if update_official: alkis_df.loc[update_official, 'official_report'] = True
+    if update_type: alkis_df.loc[list(update_type.keys()), 'correction_type'] = list(update_type.values())
+    if update_comment: alkis_df.loc[list(update_comment.keys()), 'correction_comment'] = list(update_comment.values())
+    if update_street: alkis_df.loc[list(update_street.keys()), 'street'] = list(update_street.values())
+    if update_hnr: alkis_df.loc[list(update_hnr.keys()), 'housenumber'] = list(update_hnr.values())
+
+    # Apply replacements iteratively since they depend on current value
+    for idx, ops in update_replace.items():
+        for replace_in_street, replace_with, tag, comment in ops:
+            current_st = alkis_df.at[idx, 'street']
+            if isinstance(current_st, str) and replace_in_street in current_st:
+                alkis_df.at[idx, 'street'] = current_st.replace(replace_in_street, replace_with)
+                alkis_df.at[idx, 'correction_type'] = tag
+                if comment: alkis_df.at[idx, 'correction_comment'] = comment
 
     print(f"[{state}] Applied corrections to {count} rows.")
     return alkis_df
