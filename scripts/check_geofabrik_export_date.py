@@ -1,9 +1,20 @@
+"""Update gate for run_updates.sh.
+
+Exit 0 if Geofabrik has a newer export than the last processed one for at least
+one state, else 1. Reads the internal server's pages first when a login cookie
+is available (published earlier), otherwise the public ones.
+"""
 
 import requests
 import re
 import json
 import os
 import sys
+import zoneinfo
+from datetime import datetime
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import geofabrik_auth
 
 # Configuration matches 03_import_osm.py
 STATES = {
@@ -49,30 +60,43 @@ STATES = {
     }
 }
 
-def get_remote_date(url):
-    """Fetches the Geofabrik page and extracts the timestamp."""
-    try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        
-        # Regex to find: "contains all OSM data up to 2025-12-14T21:21:45Z"
-        match = re.search(r"contains all OSM data up to ([\d-]{10}T[\d:]{8}Z)", response.text)
-        if match:
-            date_str = match.group(1)
-            try:
-                from datetime import datetime
-                import zoneinfo
-                dt = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%SZ")
-                dt = dt.replace(tzinfo=zoneinfo.ZoneInfo("UTC"))
-                return dt.astimezone(zoneinfo.ZoneInfo("Europe/Berlin")).strftime("%Y-%m-%dT%H:%M:%S")
-            except ImportError:
-                return date_str[:19]
-        else:
-            print(f"[{url}] Error: Could not find timestamp pattern.")
-            return None
-    except Exception as e:
-        print(f"[{url}] Error fetching Geofabrik page: {e}")
+def scrape_date(session, url):
+    """Fetches the Geofabrik page and extracts the timestamp.
+
+    Returns None if the page carries no timestamp.
+    """
+    response = session.get(url, timeout=10)
+    response.raise_for_status()
+
+    # Regex to find: "contains all OSM data up to 2025-12-14T21:21:45Z"
+    match = re.search(r"contains all OSM data up to ([\d-]{10}T[\d:]{8}Z)", response.text)
+    if not match:
         return None
+
+    dt = datetime.strptime(match.group(1), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=zoneinfo.ZoneInfo("UTC"))
+    return dt.astimezone(zoneinfo.ZoneInfo("Europe/Berlin")).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def get_remote_date(public_url, public_session, internal_session=None):
+    """Export date for one state, preferring the internal server."""
+    if internal_session is not None:
+        url = geofabrik_auth.internal_url(public_url)
+        try:
+            date = scrape_date(internal_session, url)
+            if date:
+                return date, "internal"
+            print(f"[{url}] No timestamp on the internal page (login not accepted?).")
+        except Exception as e:
+            print(f"[{url}] Error fetching internal page: {e}")
+
+    try:
+        date = scrape_date(public_session, public_url)
+        if date is None:
+            print(f"[{public_url}] Error: Could not find timestamp pattern.")
+        return date, "public"
+    except Exception as e:
+        print(f"[{public_url}] Error fetching Geofabrik page: {e}")
+        return None, "public"
 
 def get_local_date(history_path):
     """Reads the last processed date from the state history file."""
@@ -94,12 +118,17 @@ def main():
     update_needed = False
     
     print("Checking for updates...")
-    
+
+    cookie = geofabrik_auth.get_download_cookie()
+    internal_session = geofabrik_auth.internal_session(cookie) if cookie else None
+    public_session = requests.Session()
+    public_session.headers.update(geofabrik_auth.HEADERS)
+
     for state_key, config in STATES.items():
-        remote_date = get_remote_date(config["url"])
+        remote_date, source = get_remote_date(config["url"], public_session, internal_session)
         local_date = get_local_date(config["history_file"])
-        
-        print(f"[{state_key}] Remote: {remote_date} | Local: {local_date}")
+
+        print(f"[{state_key}] Remote ({source}): {remote_date} | Local: {local_date}")
         
         if not remote_date:
             print(f"[{state_key}] Warning: Could not fetch remote date. Skipping check.")

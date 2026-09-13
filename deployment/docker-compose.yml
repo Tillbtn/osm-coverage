@@ -46,4 +46,6 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Europe/Berlin
+      - GEOFABRIK_OSM_USER=${GEOFABRIK_OSM_USER:-}
+      - GEOFABRIK_OSM_PASSWORD=${GEOFABRIK_OSM_PASSWORD:-}
     restart: "no"
