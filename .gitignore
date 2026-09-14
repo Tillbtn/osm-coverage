@@ -14,6 +14,8 @@ backups/
 logs/
 public_data/
 
+.env
+
 # Legacy
 scripts/old/
 site_old/

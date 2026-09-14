@@ -13,6 +13,9 @@ import gc
 import hashlib
 import re
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import geofabrik_auth
+
 # Configuration
 DATA_DIR = "data"
 
@@ -159,103 +162,150 @@ UNCHANGED = "unchanged"     # local PBF is at least as new as the remote one
 FAILED = "failed"           # download/verification failed; previous PBF (if any) kept
 
 
-def _fetch_remote_md5(url, headers):
+def _looks_like_html(response):
+    """True for login/error pages served where a PBF was requested."""
+    return "html" in response.headers.get("Content-Type", "").lower()
+
+
+def _fetch_remote_md5(session, url):
     """Geofabrik publishes '<file>.md5' next to every PBF. Returns the hex digest or None."""
     try:
-        r = requests.get(url + ".md5", headers=headers, timeout=30)
+        r = session.get(url + ".md5", timeout=30)
         if r.status_code != 200:
             return None
         token = r.text.strip().split()[0].lower()
-        if re.fullmatch(r"[0-9a-f]{32}", token):
-            return token
-        print(f"  Warning: unexpected checksum file content: {r.text.strip()[:80]!r}")
+        return token if re.fullmatch(r"[0-9a-f]{32}", token) else None
     except Exception as e:
-        print(f"  Warning: could not fetch checksum {url}.md5: {e}")
-    return None
+        print(f"  Warning: could not fetch checksum: {e}")
+        return None
 
 
 def _file_md5(path):
     h = hashlib.md5()
     with open(path, "rb") as f:
-        for block in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(block)
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
     return h.hexdigest()
 
 
 def _remove_quietly(path):
     try:
-        if os.path.lexists(path):
-            os.remove(path)
+        os.remove(path)
+    except FileNotFoundError:
+        pass
     except OSError as e:
         print(f"  Warning: could not remove {path}: {e}")
 
 
-def download_pbf(url, local_path):
-    """Download the PBF if the remote copy is newer.
+def _download_from(session, url, local_path, source):
+    """One attempt against one server. Returns DOWNLOADED, UNCHANGED or FAILED.
 
-    The file is streamed to '<local_path>.part', verified against Content-Length
-    and Geofabrik's published .md5, and only then moved into place. A broken
-    connection therefore never leaves a truncated PBF at local_path; the previous
-    complete file (if any) stays untouched.
+    The file is streamed to '<local_path>.part', verified against Content-Length,
+    the PBF header magic and Geofabrik's published .md5, and only then moved into
+    place. A broken connection or a login page served in place of the file
+    therefore never leaves a bad PBF at local_path; the previous complete file
+    (if any) stays untouched.
     """
-    print(f"Checking {url}...")
-
     part_path = local_path + ".part"
-    _remove_quietly(part_path)  # leftover from a crashed run
+    print(f"Checking {source} URL {url}...")
 
+    head_response = None
     try:
-        head_response = requests.head(url, allow_redirects=True, timeout=30)
+        head_response = session.head(url, allow_redirects=True, timeout=30)
         head_response.raise_for_status()
-        last_modified = head_response.headers.get("Last-Modified")
+    except Exception as e:
+        print(f"Warning: Could not check timestamp on the {source} server: {e}")
+        if source == "internal":
+            # Usually a rejected cookie; skip the download.
+            return FAILED
+        print("Proceeding with download attempt.")
 
+    if head_response is not None:
+        # A rejected cookie does not produce an error: the internal server
+        # answers HTTP 200 with the OSM login page. Only the content type gives
+        # it away.
+        if _looks_like_html(head_response):
+            if source == "internal":
+                print("  Internal server sent HTML instead of a PBF: login cookie not accepted.")
+            else:
+                print("  Public server sent HTML instead of a PBF.")
+            return FAILED
+
+        last_modified = head_response.headers.get("Last-Modified")
         if last_modified and os.path.exists(local_path):
             remote_time = parsedate_to_datetime(last_modified)
             local_time = datetime.fromtimestamp(os.path.getmtime(local_path), tz=timezone.utc)
-            
-            # If local is newer or same, we skip.
+
+            # Local copy is at least as new.
             if remote_time <= local_time:
                 print(f"  Local file is up-to-date (Remote: {remote_time}, Local: {local_time}). Skipping download.")
                 return UNCHANGED
 
-    except Exception as e:
-        print(f"Warning: Could not check timestamp: {e}. Proceeding with download attempt.")
-
     print(f"Downloading {url} to {local_path}...")
     try:
-        with requests.get(url, stream=True, timeout=30) as r:
+        with session.get(url, stream=True, timeout=30) as r:
             r.raise_for_status()
+            if _looks_like_html(r):
+                raise IOError("server sent an HTML page instead of a PBF (login rejected?)")
             total_size = int(r.headers.get('content-length', 0))
             received = 0
             block_size = 8192
-            with open(part_path, 'wb') as f, tqdm.tqdm(total=total_size, unit='iB', unit_scale=True, desc=f"DL {url.split('/')[-1]}", position=1, leave=False, disable=not sys.stdout.isatty()) as t:
-                for chunk in r.iter_content(chunk_size=block_size):
-                    t.update(len(chunk))
-                    f.write(chunk)
-                    received += len(chunk)
+            with open(part_path, 'wb') as f, tqdm.tqdm(total=total_size, unit='iB', unit_scale=True) as bar:
+                for data in r.iter_content(block_size):
+                    f.write(data)
+                    received += len(data)
+                    bar.update(len(data))
 
-        # Verification 1: byte count (when the server announced one)
+        # Verification 1: byte count
         if total_size and received != total_size:
             raise IOError(f"incomplete download: {received} of {total_size} bytes received")
 
-        # Verification 2: Geofabrik's published checksum (when available)
-        expected_md5 = _fetch_remote_md5(url, {})
+        # Verification 2: it has to be a PBF at all
+        with open(part_path, "rb") as f:
+            if b"OSMHeader" not in f.read(32):
+                raise IOError("downloaded file does not start with an OSM PBF header")
+
+        # Verification 3: Geofabrik's published checksum (when available)
+        expected_md5 = _fetch_remote_md5(session, url)
         if expected_md5:
             actual_md5 = _file_md5(part_path)
             if actual_md5 != expected_md5:
                 raise IOError(f"checksum mismatch: got {actual_md5}, expected {expected_md5}")
             print(f"  Checksum OK ({received} bytes).")
         else:
-            print(f"  No checksum published; size check passed ({received} bytes).")
+            print(f"  No checksum published on the {source} server; size check passed ({received} bytes).")
 
         os.replace(part_path, local_path)
-        print("Download complete.")
+        print(f"Download complete ({source} server).")
         return DOWNLOADED
     except Exception as e:
         _remove_quietly(part_path)
         print(f"Failed to download {url}: {e}")
-        if os.path.exists(local_path):
-            print(f"  Keeping previous PBF {local_path}.")
         return FAILED
+
+
+def download_pbf(public_url, local_path):
+    """Download the PBF for one state if the remote copy is newer.
+
+    Tries the internal server first when a cookie is available, then
+    the public one.
+    """
+    _remove_quietly(local_path + ".part")  # leftover from a crashed run
+
+    cookie = geofabrik_auth.get_download_cookie()
+    if cookie:
+        with geofabrik_auth.internal_session(cookie) as session:
+            status = _download_from(session, geofabrik_auth.internal_url(public_url), local_path, "internal")
+        if status != FAILED:
+            return status
+        print("  Internal server did not deliver; falling back to the public server...")
+
+    with requests.Session() as session:
+        session.headers.update(geofabrik_auth.HEADERS)
+        status = _download_from(session, public_url, local_path, "public")
+    if status == FAILED and os.path.exists(local_path):
+        print(f"  Keeping previous PBF {local_path}.")
+    return status
 
 
 # Messages osmium produces when a PBF is truncated or otherwise unreadable.

@@ -31,7 +31,35 @@ Add the following line to your crontab:
 0 * * * * cd /opt/osm-coverage/deployment && docker compose run --rm worker
 ```
 
-## 4. Update
+## 4. Optional: Geofabrik's internal download server
+
+The pipeline downloads OSM extracts from the public Geofabrik server, whose
+exports are occasionally delayed. The internal server
+(`osm-internal.download.geofabrik.de`) publishes the same extracts earlier and
+under less load, but only to logged-in OpenStreetMap accounts.
+
+```bash
+cp deployment/.env.example deployment/.env
+chmod 600 deployment/.env
+$EDITOR deployment/.env        # GEOFABRIK_OSM_USER / GEOFABRIK_OSM_PASSWORD
+```
+
+Compose reads `deployment/.env` automatically for the cronjob above (it runs
+from `deployment/`). Verify the credentials before the next cron run:
+
+```bash
+docker compose run --rm --entrypoint python worker scripts/geofabrik_auth.py --test
+```
+
+That logs in, caches the cookie in `data/.geofabrik_cookie` (mode 600, reused
+until it expires) and does one authenticated request. During updates each
+download logs which server it came from.
+
+Everything here is optional: without credentials, with an expired cookie, or
+when the OSM login form changes, the worker logs the reason and downloads from
+the public server. To go back, delete `deployment/.env`.
+
+## 5. Update
 To update the site with the latest updates:
 
 ```bash
