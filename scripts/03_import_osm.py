@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 import gc
 import hashlib
 import re
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import geofabrik_auth
@@ -175,8 +176,7 @@ def _fetch_remote_md5(session, url):
             return None
         token = r.text.strip().split()[0].lower()
         return token if re.fullmatch(r"[0-9a-f]{32}", token) else None
-    except Exception as e:
-        print(f"  Warning: could not fetch checksum: {e}")
+    except Exception:
         return None
 
 
@@ -197,8 +197,16 @@ def _remove_quietly(path):
         print(f"  Warning: could not remove {path}: {e}")
 
 
+def _human_size(num_bytes):
+    return f"{num_bytes / 1048576:.0f} MB" if num_bytes else "unknown size"
+
+
 def _download_from(session, url, local_path, source):
-    """One attempt against one server. Returns DOWNLOADED, UNCHANGED or FAILED.
+    """One attempt against one server. Returns (status, detail).
+
+    detail is a short phrase the caller folds into its single log line for this
+    file; for FAILED it carries the reason. Nothing is printed here, so a
+    successful attempt stays at one line in the cron log.
 
     The file is streamed to '<local_path>.part', verified against Content-Length,
     the PBF header magic and Geofabrik's published .md5, and only then moved into
@@ -207,29 +215,25 @@ def _download_from(session, url, local_path, source):
     (if any) stays untouched.
     """
     part_path = local_path + ".part"
-    print(f"Checking {source} URL {url}...")
 
     head_response = None
     try:
         head_response = session.head(url, allow_redirects=True, timeout=30)
         head_response.raise_for_status()
     except Exception as e:
-        print(f"Warning: Could not check timestamp on the {source} server: {e}")
         if source == "internal":
             # Usually a rejected cookie; skip the download.
-            return FAILED
-        print("Proceeding with download attempt.")
+            return FAILED, f"HEAD request failed: {e}"
+        # The public server may still answer the GET; try it without a timestamp.
+        head_response = None
 
     if head_response is not None:
         # A rejected cookie does not produce an error: the internal server
         # answers HTTP 200 with the OSM login page. Only the content type gives
         # it away.
         if _looks_like_html(head_response):
-            if source == "internal":
-                print("  Internal server sent HTML instead of a PBF: login cookie not accepted.")
-            else:
-                print("  Public server sent HTML instead of a PBF.")
-            return FAILED
+            return FAILED, ("HTML instead of a PBF: login cookie not accepted"
+                            if source == "internal" else "HTML instead of a PBF")
 
         last_modified = head_response.headers.get("Last-Modified")
         if last_modified and os.path.exists(local_path):
@@ -238,10 +242,10 @@ def _download_from(session, url, local_path, source):
 
             # Local copy is at least as new.
             if remote_time <= local_time:
-                print(f"  Local file is up-to-date (Remote: {remote_time}, Local: {local_time}). Skipping download.")
-                return UNCHANGED
+                return UNCHANGED, (f"up-to-date ({source} server, "
+                                   f"remote {remote_time:%Y-%m-%d %H:%M %Z})")
 
-    print(f"Downloading {url} to {local_path}...")
+    started = time.monotonic()
     try:
         with session.get(url, stream=True, timeout=30) as r:
             r.raise_for_status()
@@ -250,7 +254,11 @@ def _download_from(session, url, local_path, source):
             total_size = int(r.headers.get('content-length', 0))
             received = 0
             block_size = 8192
-            with open(part_path, 'wb') as f, tqdm.tqdm(total=total_size, unit='iB', unit_scale=True) as bar:
+            # Without the isatty guard the bar fills the cron log with refreshes.
+            with open(part_path, 'wb') as f, tqdm.tqdm(
+                    total=total_size, unit='iB', unit_scale=True,
+                    desc=f"DL {os.path.basename(local_path)}", position=1, leave=False,
+                    disable=not sys.stdout.isatty()) as bar:
                 for data in r.iter_content(block_size):
                     f.write(data)
                     received += len(data)
@@ -271,41 +279,50 @@ def _download_from(session, url, local_path, source):
             actual_md5 = _file_md5(part_path)
             if actual_md5 != expected_md5:
                 raise IOError(f"checksum mismatch: got {actual_md5}, expected {expected_md5}")
-            print(f"  Checksum OK ({received} bytes).")
+            checked = "md5 OK"
         else:
-            print(f"  No checksum published on the {source} server; size check passed ({received} bytes).")
+            checked = "no .md5 published, size checked"
 
         os.replace(part_path, local_path)
-        print(f"Download complete ({source} server).")
-        return DOWNLOADED
+        return DOWNLOADED, (f"downloaded {_human_size(received)} from the {source} server "
+                            f"in {time.monotonic() - started:.0f} s, {checked}")
     except Exception as e:
         _remove_quietly(part_path)
-        print(f"Failed to download {url}: {e}")
-        return FAILED
+        return FAILED, str(e)
 
 
-def download_pbf(public_url, local_path):
+def download_pbf(public_url, local_path, label):
     """Download the PBF for one state if the remote copy is newer.
 
-    Tries the internal server first when a cookie is available, then
-    the public one.
+    Tries the internal server first when a cookie is available, then the public
+    one. A cookie that expired since the run started is renewed once (the server
+    answers it with a login page, not an error), so the state after the expiry
+    still gets the internal download. Returns (status, detail); the caller prints
+    detail as part of its one line for this file. Only a failed attempt logs a
+    line of its own here.
     """
     _remove_quietly(local_path + ".part")  # leftover from a crashed run
 
     cookie = geofabrik_auth.get_download_cookie()
-    if cookie:
+    for attempt in (1, 2):  # the second attempt runs with a renewed cookie
+        if not cookie:
+            break
         with geofabrik_auth.internal_session(cookie) as session:
-            status = _download_from(session, geofabrik_auth.internal_url(public_url), local_path, "internal")
+            status, detail = _download_from(
+                session, geofabrik_auth.internal_url(public_url), local_path, "internal")
         if status != FAILED:
-            return status
-        print("  Internal server did not deliver; falling back to the public server...")
+            return status, detail
+        cookie = geofabrik_auth.refresh_download_cookie() if attempt == 1 else None
+        if not cookie:
+            print(f"[{label}] Internal server did not deliver ({detail}); "
+                  "falling back to the public server.")
 
     with requests.Session() as session:
         session.headers.update(geofabrik_auth.HEADERS)
-        status = _download_from(session, public_url, local_path, "public")
-    if status == FAILED and os.path.exists(local_path):
-        print(f"  Keeping previous PBF {local_path}.")
-    return status
+        status, detail = _download_from(session, public_url, local_path, "public")
+    if status == FAILED:
+        return status, f"download failed ({detail})"
+    return status, detail
 
 
 # Messages osmium produces when a PBF is truncated or otherwise unreadable.
@@ -351,23 +368,25 @@ def process_state(state_key, config):
                         shutil.copy2(bb_pbf_path, pbf_path)
             return True
     
-    status = download_pbf(config["pbf_url"], pbf_path)
+    pbf_name = config["pbf_file"]
+    status, detail = download_pbf(config["pbf_url"], pbf_path, state_key)
     failed = status == FAILED
 
     if failed:
         if not os.path.exists(pbf_path):
-            print(f"[{state_key}] Download failed and no previous PBF exists. Skipping.")
+            print(f"[{state_key}] {pbf_name}: {detail}, no previous PBF - skipping state.")
             return False
-        print(f"[{state_key}] Download failed; continuing with the previous PBF.")
-    
+        detail += ", continuing with the previous PBF"
+
     if status != DOWNLOADED and os.path.exists(output_parquet):
         pbf_time = os.path.getmtime(pbf_path)
         parq_time = os.path.getmtime(output_parquet)
         if parq_time > pbf_time:
-            print(f"[{state_key}] Parquet is newer than PBF. Skipping processing.")
+            print(f"[{state_key}] {pbf_name}: {detail}, parquet is newer - nothing to do.")
             return not failed
 
-    print(f"[{state_key}] Extracting addresses from PBF in chunks of {CHUNK_SIZE}...")
+    print(f"[{state_key}] {pbf_name}: {detail}, extracting addresses "
+          f"in chunks of {CHUNK_SIZE}...")
     handler = AddressHandler(state_key=state_key)
     
     try:

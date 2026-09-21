@@ -77,17 +77,36 @@ def scrape_date(session, url):
     return dt.astimezone(zoneinfo.ZoneInfo("Europe/Berlin")).strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def get_remote_date(public_url, public_session, internal_session=None):
-    """Export date for one state, preferring the internal server."""
-    if internal_session is not None:
+def open_internal_session(force_refresh=False):
+    """A session for the internal server, or None without a usable cookie."""
+    cookie = (geofabrik_auth.refresh_download_cookie() if force_refresh
+              else geofabrik_auth.get_download_cookie())
+    return geofabrik_auth.internal_session(cookie) if cookie else None
+
+
+def get_remote_date(public_url, public_session, internal):
+    """Export date for one state, preferring the internal server.
+
+    'internal' holds the shared internal session ({"session": ...}): the server
+    answers an expired cookie with the OSM login page rather than an error, so a
+    rejected page triggers one fresh login, which the remaining states reuse. If
+    that does not help either, the run continues on the public server.
+    """
+    for attempt in (1, 2):  # the second attempt runs with a renewed cookie
+        if internal["session"] is None:
+            break
         url = geofabrik_auth.internal_url(public_url)
         try:
-            date = scrape_date(internal_session, url)
+            date = scrape_date(internal["session"], url)
             if date:
                 return date, "internal"
-            print(f"[{url}] No timestamp on the internal page (login not accepted?).")
+            reason = "no timestamp on the internal page (login not accepted?)"
         except Exception as e:
-            print(f"[{url}] Error fetching internal page: {e}")
+            reason = f"error fetching the internal page: {e}"
+        internal["session"] = (open_internal_session(force_refresh=True)
+                               if attempt == 1 else None)
+        if internal["session"] is None:
+            print(f"[{url}] {reason}; using the public server.")
 
     try:
         date = scrape_date(public_session, public_url)
@@ -119,13 +138,12 @@ def main():
     
     print("Checking for updates...")
 
-    cookie = geofabrik_auth.get_download_cookie()
-    internal_session = geofabrik_auth.internal_session(cookie) if cookie else None
+    internal = {"session": open_internal_session()}
     public_session = requests.Session()
     public_session.headers.update(geofabrik_auth.HEADERS)
 
     for state_key, config in STATES.items():
-        remote_date, source = get_remote_date(config["url"], public_session, internal_session)
+        remote_date, source = get_remote_date(config["url"], public_session, internal)
         local_date = get_local_date(config["history_file"])
 
         print(f"[{state_key}] Remote ({source}): {remote_date} | Local: {local_date}")

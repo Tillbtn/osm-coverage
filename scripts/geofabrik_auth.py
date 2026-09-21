@@ -25,6 +25,7 @@ CLI:
 """
 
 import argparse
+import datetime
 import os
 import re
 import sys
@@ -42,6 +43,11 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_COOKIE_FILE = os.path.join(_REPO_ROOT, "data", ".geofabrik_cookie")
 HEADERS = {"User-Agent": "osm-coverage/1.0 (github.com/Tillbtn/osm-coverage)"}
 TIMEOUT = 30
+
+# /cookie_status calls a cookie valid until its very last second. A run that
+# starts just before the expiry loses the internal server halfway through its
+# downloads, so a cookie with less than this left is renewed up front.
+COOKIE_MIN_REMAINING = 3600
 
 # Small PBF for a --test request.
 TEST_PBF = f"{INTERNAL_BASE}/europe/germany/hamburg-latest-internal.osm.pbf"
@@ -91,6 +97,37 @@ def cookie_status(cookie):
         return {"cookie_status": "unknown", "description": "no JSON in cookie_status response"}
     except requests.RequestException as e:
         return {"cookie_status": "unreachable", "description": str(e)}
+
+
+def cookie_expiry(status):
+    """/cookie_status's 'valid_until' as an aware datetime, or None if absent."""
+    raw = (status or {}).get("valid_until")
+    if not raw:
+        return None
+    try:
+        expires = datetime.datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=datetime.timezone.utc)
+    return expires
+
+
+def _remaining(expires):
+    """Seconds until the cookie expires, or None when the server did not say."""
+    if expires is None:
+        return None
+    return (expires - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
+
+
+def describe_validity(expires):
+    """How long a cookie is good for, in local time (the logs are local too)."""
+    remaining = _remaining(expires)
+    if remaining is None:
+        return "the server did not say until when"
+    local = expires.astimezone().strftime("%Y-%m-%d %H:%M")
+    left = f"{remaining / 60:.0f} min" if remaining < 5400 else f"{remaining / 3600:.1f} h"
+    return f"{left} left, until {local} local time"
 
 
 def _cookie_file():
@@ -244,10 +281,17 @@ def resolve_cookie(force_refresh=False):
         if cookie:
             status = cookie_status(cookie)
             state = status.get("cookie_status")
-            if state == "valid":
-                print(f"[geofabrik] Using cached cookie (valid until {status.get('valid_until')}).")
+            expires = cookie_expiry(status)
+            remaining = _remaining(expires)
+            if state == "valid" and (remaining is None or remaining >= COOKIE_MIN_REMAINING):
+                print(f"[geofabrik] Using cached cookie ({describe_validity(expires)}).")
                 return cookie
-            print(f"[geofabrik] Cached cookie is not usable ({state}: {status.get('description')}).")
+            if state == "valid":
+                print(f"[geofabrik] Cached cookie expires too soon "
+                      f"({describe_validity(expires)}); logging in again.")
+            else:
+                print(f"[geofabrik] Cached cookie is not usable "
+                      f"({state}: {status.get('description')}).")
 
     user = os.environ.get("GEOFABRIK_OSM_USER")
     password = os.environ.get("GEOFABRIK_OSM_PASSWORD")
@@ -255,13 +299,28 @@ def resolve_cookie(force_refresh=False):
         print("[geofabrik] GEOFABRIK_OSM_USER/GEOFABRIK_OSM_PASSWORD not set. "
               "Using the public download server.")
         return None
-    print(f"[geofabrik] Requesting a new download cookie for OSM user {user}...")
+    print("[geofabrik] Requesting a new download cookie...")
     cookie = fetch_cookie(user, password)
     try:
         write_cached_cookie(cookie)
     except OSError as e:
         print(f"[geofabrik] Warning: could not cache the cookie: {e}")
     return cookie
+
+
+def refresh_download_cookie():
+    """One fresh login per process, for callers the server just turned away.
+
+    The internal server answers a stale cookie with HTTP 200 and an HTML login
+    page, so an expiry that happens mid-run only shows up in a response body.
+    Returns the new cookie, or None without credentials, after a failed login,
+    or when this process already refreshed once (a genuinely rejected account
+    must not cause one login attempt per state).
+    """
+    if _MEMO.get("refreshed"):
+        return None
+    _MEMO["refreshed"] = True
+    return get_download_cookie(force_refresh=True)
 
 
 def get_download_cookie(force_refresh=False):
@@ -328,7 +387,7 @@ def main():
 
     status = cookie_status(cookie)
     print(f"[geofabrik] Cookie status: {status.get('cookie_status')} "
-          f"(valid until {status.get('valid_until')}), cached in {_cookie_file()}")
+          f"({describe_validity(cookie_expiry(status))}), cached in {_cookie_file()}")
     if args.test:
         return _cmd_test(cookie)
     return 0

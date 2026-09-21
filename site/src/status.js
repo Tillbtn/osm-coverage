@@ -68,13 +68,16 @@ const alkisGenerated = document.getElementById('alkis-generated');
 const DASH = '<span class="muted-dash">–</span>';
 
 // A date-only value ('2026-06-19' or '2026-06') -> 'dd.mm.yyyy' / 'mm/yyyy'.
-function fmtDate(d) {
-    if (!d) return DASH;
+function dateText(d) {
     const s = String(d).slice(0, 10);
     const m = s.match(/^(\d{4})-(\d{2})(?:-(\d{2}))?$/);
-    if (!m) return `<span class="date">${s}</span>`;
-    const out = m[3] ? `${m[3]}.${m[2]}.${m[1]}` : `${m[2]}/${m[1]}`;
-    return `<span class="date">${out}</span>`;
+    if (!m) return s;
+    return m[3] ? `${m[3]}.${m[2]}.${m[1]}` : `${m[2]}/${m[1]}`;
+}
+
+function fmtDate(d) {
+    if (!d) return DASH;
+    return `<span class="date">${dateText(d)}</span>`;
 }
 
 // A full timestamp -> 'dd.mm.yyyy' with the time on a second line.
@@ -109,12 +112,19 @@ async function fetchAlkisStatus() {
             return html;
         };
 
-        // "Verarbeitet": the ALKIS stand we hold, plus when it was processed.
+        // "Verarbeitet": the ALKIS stand the published comparison reflects,
+        // plus when it was fetched. A newer extract that no comparison has used
+        // yet gets its own line, so the column never claims a stand the map
+        // does not actually show.
         const processedCell = (o) => {
             let html = fmtDate(o.processed_date);
             if (o.processed_date && o.processed_at) {
                 const at = new Date(o.processed_at);
                 if (!isNaN(at)) html += `<span class="cell-sub">verarb. ${at.toLocaleDateString('de-DE')}</span>`;
+            }
+            if (o.extracted_date && o.extracted_date !== o.processed_date) {
+                html += '<span class="cell-sub" title="Liegt vor, wird mit dem nächsten Vergleich wirksam">'
+                    + `extrahiert: ${dateText(o.extracted_date)}</span>`;
             }
             return html;
         };

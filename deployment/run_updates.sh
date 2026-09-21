@@ -73,7 +73,6 @@ else
 fi
 
 # Refresh the ALKIS freshness dashboard
-echo "Refreshing ALKIS status dashboard..."
 python scripts/check_alkis_dates.py || echo "Warning: ALKIS status check failed."
 
 exit 0
