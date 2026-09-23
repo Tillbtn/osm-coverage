@@ -24,6 +24,7 @@ import os
 import io
 import sys
 import json
+import time
 import argparse
 import importlib.util
 
@@ -92,6 +93,45 @@ WFS_SOURCES = _alkis_sources.wfs_sub_sources()
 # ---------------------------------------------------------------------------
 # WFS fetching
 # ---------------------------------------------------------------------------
+# The Aachen endpoint sometimes ends a response mid-JSON: HTTP 200, no error,
+# only the parse fails (2026-09-22 after 2.2 MB, 2026-09-23 after 17.4 MB). One
+# such page used to abort the whole daily fetch, so pages are retried.
+WFS_PAGE_ATTEMPTS = 4
+WFS_RETRY_WAIT = 5  # seconds, multiplied by the attempt number
+
+
+def _fetch_page(source, params, session, timeout):
+    """One GetFeature page as a parsed dict.
+
+    Retries cover both observed failures: an HTTP error and a response that ends
+    mid-JSON. Raises RuntimeError when no attempt returns a usable page; the
+    caller then keeps the district's existing rows instead of replacing them
+    with a partial fetch.
+    """
+    key = source.get("key", "wfs")
+    for attempt in range(1, WFS_PAGE_ATTEMPTS + 1):
+        try:
+            resp = session.get(source["base_url"], params=params, timeout=timeout)
+            resp.raise_for_status()
+            expected = resp.headers.get("Content-Length")
+            if expected is not None and len(resp.content) != int(expected):
+                raise IOError(f"received {len(resp.content)} of {expected} bytes")
+            try:
+                return resp.json()
+            except json.JSONDecodeError:
+                # Fallback for a charset requests cannot use.
+                return json.load(io.BytesIO(resp.content))
+        except (requests.RequestException, ValueError, IOError) as e:
+            problem = e
+        if attempt < WFS_PAGE_ATTEMPTS:
+            wait = WFS_RETRY_WAIT * attempt
+            print(f"  [{key}] page at startIndex={params['startIndex']} failed "
+                  f"({problem}); retrying in {wait} s")
+            time.sleep(wait)
+    raise RuntimeError(f"page at startIndex={params['startIndex']} failed "
+                       f"{WFS_PAGE_ATTEMPTS} times, last error: {problem}")
+
+
 def fetch_wfs_features(source, session=None, timeout=300):
     """
     Page through a WFS endpoint and return a flat list of GeoJSON feature dicts.
@@ -115,13 +155,7 @@ def fetch_wfs_features(source, session=None, timeout=300):
             "startIndex": start,
             count_param: page_size,
         }
-        resp = session.get(source["base_url"], params=params, timeout=timeout)
-        resp.raise_for_status()
-
-        try:
-            data = resp.json()
-        except json.JSONDecodeError:
-            data = json.load(io.BytesIO(resp.content))
+        data = _fetch_page(source, params, session, timeout)
 
         page = data.get("features", [])
         if not page:

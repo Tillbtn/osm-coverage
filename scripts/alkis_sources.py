@@ -82,7 +82,7 @@ _AACHEN_WFS = {
     "version": "1.1.0",
     "count_param": "maxFeatures",
     "srs": "EPSG:25832",
-    "page_size": 50000,
+    "page_size": 25000,         # smaller pages fail less often (see _fetch_page)
     "state_dir": "nrw",
     "state_label": "NRW",
     "mode": "district",         # fetch_alkis_wfs behaviour: replace one district
