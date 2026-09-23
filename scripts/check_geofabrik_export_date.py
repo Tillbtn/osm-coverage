@@ -84,29 +84,51 @@ def open_internal_session(force_refresh=False):
     return geofabrik_auth.internal_session(cookie) if cookie else None
 
 
+def read_internal_page(session, url):
+    """(date, problem, cookie_rejected) for one page on the internal server."""
+    try:
+        date = scrape_date(session, url)
+    except requests.HTTPError as e:
+        code = e.response.status_code if e.response is not None else None
+        # 401/403 points at the cookie. A 5xx says nothing about the login and
+        # must not trigger one.
+        return None, f"internal page answered HTTP {code}", code in (401, 403)
+    except Exception as e:
+        return None, f"error fetching the internal page: {e}", False
+    if date:
+        return date, None, False
+    # An expired cookie is answered with the OSM login page: HTTP 200, no date.
+    return None, "no timestamp on the internal page (login not accepted?)", True
+
+
 def get_remote_date(public_url, public_session, internal):
     """Export date for one state, preferring the internal server.
 
-    'internal' holds the shared internal session ({"session": ...}): the server
-    answers an expired cookie with the OSM login page rather than an error, so a
-    rejected page triggers one fresh login, which the remaining states reuse. If
-    that does not help either, the run continues on the public server.
+    'internal' holds the shared internal session ({"session": ...}). A rejected
+    cookie triggers one fresh login, which the remaining states reuse; if the
+    renewed cookie is rejected too, the run gives up on the internal server. A
+    server error sends only this state to the public pages, is logged once per
+    run, and the next state tries the internal server again.
     """
     for attempt in (1, 2):  # the second attempt runs with a renewed cookie
         if internal["session"] is None:
             break
         url = geofabrik_auth.internal_url(public_url)
-        try:
-            date = scrape_date(internal["session"], url)
-            if date:
-                return date, "internal"
-            reason = "no timestamp on the internal page (login not accepted?)"
-        except Exception as e:
-            reason = f"error fetching the internal page: {e}"
-        internal["session"] = (open_internal_session(force_refresh=True)
-                               if attempt == 1 else None)
-        if internal["session"] is None:
-            print(f"[{url}] {reason}; using the public server.")
+        date, problem, rejected = read_internal_page(internal["session"], url)
+        if date:
+            return date, "internal"
+        if rejected and attempt == 1:
+            internal["session"] = open_internal_session(force_refresh=True)
+            if internal["session"] is not None:
+                continue
+        elif rejected:
+            internal["session"] = None  # the renewed cookie is rejected too
+        gave_up = internal["session"] is None
+        if gave_up or not internal.get("warned"):
+            internal["warned"] = True
+            print(f"[{url}] {problem}; using the public server"
+                  f"{' for the rest of this run' if gave_up else ''}.")
+        break
 
     try:
         date = scrape_date(public_session, public_url)

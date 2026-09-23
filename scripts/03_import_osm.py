@@ -161,6 +161,7 @@ class AddressHandler(osmium.SimpleHandler):
 DOWNLOADED = "downloaded"   # a new, verified PBF is in place
 UNCHANGED = "unchanged"     # local PBF is at least as new as the remote one
 FAILED = "failed"           # download/verification failed; previous PBF (if any) kept
+REJECTED = "rejected"       # internal only: the login cookie was rejected
 
 
 def _looks_like_html(response):
@@ -222,8 +223,9 @@ def _download_from(session, url, local_path, source):
         head_response.raise_for_status()
     except Exception as e:
         if source == "internal":
-            # Usually a rejected cookie; skip the download.
-            return FAILED, f"HEAD request failed: {e}"
+            # No answer from server for this file. Only 401/403 are cookie related, 5xx not.
+            code = getattr(getattr(e, "response", None), "status_code", None)
+            return (REJECTED if code in (401, 403) else FAILED), f"HEAD request failed: {e}"
         # The public server may still answer the GET; try it without a timestamp.
         head_response = None
 
@@ -232,8 +234,9 @@ def _download_from(session, url, local_path, source):
         # answers HTTP 200 with the OSM login page. Only the content type gives
         # it away.
         if _looks_like_html(head_response):
-            return FAILED, ("HTML instead of a PBF: login cookie not accepted"
-                            if source == "internal" else "HTML instead of a PBF")
+            if source == "internal":
+                return REJECTED, "HTML instead of a PBF: login cookie not accepted"
+            return FAILED, "HTML instead of a PBF"
 
         last_modified = head_response.headers.get("Last-Modified")
         if last_modified and os.path.exists(local_path):
@@ -295,9 +298,9 @@ def download_pbf(public_url, local_path, label):
     """Download the PBF for one state if the remote copy is newer.
 
     Tries the internal server first when a cookie is available, then the public
-    one. A cookie that expired since the run started is renewed once (the server
-    answers it with a login page, not an error), so the state after the expiry
-    still gets the internal download. Returns (status, detail); the caller prints
+    one. A rejected cookie (answered with a login page instead of an error) is
+    renewed once, so a cookie that expired since the run started costs at most
+    one state its internal download. Returns (status, detail); the caller prints
     detail as part of its one line for this file. Only a failed attempt logs a
     line of its own here.
     """
@@ -310,9 +313,10 @@ def download_pbf(public_url, local_path, label):
         with geofabrik_auth.internal_session(cookie) as session:
             status, detail = _download_from(
                 session, geofabrik_auth.internal_url(public_url), local_path, "internal")
-        if status != FAILED:
+        if status not in (FAILED, REJECTED):
             return status, detail
-        cookie = geofabrik_auth.refresh_download_cookie() if attempt == 1 else None
+        cookie = (geofabrik_auth.refresh_download_cookie()
+                  if status == REJECTED and attempt == 1 else None)
         if not cookie:
             print(f"[{label}] Internal server did not deliver ({detail}); "
                   "falling back to the public server.")

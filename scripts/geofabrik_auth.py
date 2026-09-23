@@ -44,9 +44,9 @@ DEFAULT_COOKIE_FILE = os.path.join(_REPO_ROOT, "data", ".geofabrik_cookie")
 HEADERS = {"User-Agent": "osm-coverage/1.0 (github.com/Tillbtn/osm-coverage)"}
 TIMEOUT = 30
 
-# /cookie_status calls a cookie valid until its very last second. A run that
-# starts just before the expiry loses the internal server halfway through its
-# downloads, so a cookie with less than this left is renewed up front.
+# /cookie_status reports a cookie as valid up to the second it expires. A run
+# started shortly before that loses the internal server in the middle of its
+# downloads, so a cookie with less time left than this is renewed beforehand.
 COOKIE_MIN_REMAINING = 3600
 
 # Small PBF for a --test request.
@@ -121,7 +121,7 @@ def _remaining(expires):
 
 
 def describe_validity(expires):
-    """How long a cookie is good for, in local time (the logs are local too)."""
+    """Remaining validity in local time (the log timestamps are local, the API is UTC)."""
     remaining = _remaining(expires)
     if remaining is None:
         return "the server did not say until when"
@@ -309,13 +309,13 @@ def resolve_cookie(force_refresh=False):
 
 
 def refresh_download_cookie():
-    """One fresh login per process, for callers the server just turned away.
+    """Log in again, at most once per process, after the server rejected a cookie.
 
-    The internal server answers a stale cookie with HTTP 200 and an HTML login
-    page, so an expiry that happens mid-run only shows up in a response body.
-    Returns the new cookie, or None without credentials, after a failed login,
-    or when this process already refreshed once (a genuinely rejected account
-    must not cause one login attempt per state).
+    An expired cookie is answered with HTTP 200 and an HTML login page, so
+    callers only recognise it from the response body. Returns the new cookie, or
+    None without credentials, after a failed login, or when this process already
+    refreshed once (an account that is rejected for good reason must not cause
+    one login attempt per state).
     """
     if _MEMO.get("refreshed"):
         return None

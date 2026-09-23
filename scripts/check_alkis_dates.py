@@ -13,9 +13,9 @@ page to render.
   remote_date    : probed cheaply via scripts/alkis_sources.py (no full download).
   update_available: remote_date is newer than processed_date -> reprocess ALKIS.
 
-Prints one summary line; pass --verbose for the per-state values (the default
-when run interactively) - the hourly cron run keeps the log short because the
-numbers are on the status page anyway.
+Prints one summary line; --verbose adds the per-state values and is the default
+on a terminal. The hourly cron run stays at the summary line, the values are on
+the status page.
 
 Usage:
     python scripts/check_alkis_dates.py

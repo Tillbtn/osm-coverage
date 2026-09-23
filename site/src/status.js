@@ -114,8 +114,7 @@ async function fetchAlkisStatus() {
 
         // "Verarbeitet": the ALKIS stand the published comparison reflects,
         // plus when it was fetched. A newer extract that no comparison has used
-        // yet gets its own line, so the column never claims a stand the map
-        // does not actually show.
+        // yet gets its own line, so the column only shows what is on the map.
         const processedCell = (o) => {
             let html = fmtDate(o.processed_date);
             if (o.processed_date && o.processed_at) {
