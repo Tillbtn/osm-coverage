@@ -33,6 +33,9 @@ import pandas as pd
 import geopandas as gpd
 from shapely.geometry import shape
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import notify
+
 DATA_DIR = "data"
 TARGET_CRS = "EPSG:25832"
 
@@ -501,13 +504,23 @@ def main():
             sys.exit(1)
 
     ok = True
-    for source in sources:
-        try:
-            if not run_source(source, dry_run=args.dry_run, force=args.force):
-                ok = False
-        except Exception as e:
-            ok = False
-            print(f"[{source['key']}] ERROR: {e}")
+    with notify.batch():
+        for source in sources:
+            error = None
+            try:
+                if not run_source(source, dry_run=args.dry_run, force=args.force):
+                    error = "fetch or write failed, see update.log"
+            except Exception as e:
+                error = str(e)
+                print(f"[{source['key']}] ERROR: {e}")
+            ok = ok and error is None
+            if args.dry_run:
+                continue
+            if error:
+                notify.track_failure(f"wfs:{source['key']}", error, threshold=2,
+                                     title=f"WFS {source.get('label') or source['key']} schlägt fehl")
+            else:
+                notify.track_success(f"wfs:{source['key']}")
 
     sys.exit(0 if ok else 1)
 

@@ -16,6 +16,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import geofabrik_auth
+import notify
 
 # Configuration
 DATA_DIR = "data"
@@ -162,6 +163,9 @@ DOWNLOADED = "downloaded"   # a new, verified PBF is in place
 UNCHANGED = "unchanged"     # local PBF is at least as new as the remote one
 FAILED = "failed"           # download/verification failed; previous PBF (if any) kept
 REJECTED = "rejected"       # internal only: the login cookie was rejected
+
+# "<state>: <reason>" for every download that fell back to the public server.
+_internal_problems = []
 
 
 def _looks_like_html(response):
@@ -320,6 +324,7 @@ def download_pbf(public_url, local_path, label):
         if not cookie:
             print(f"[{label}] Internal server did not deliver ({detail}); "
                   "falling back to the public server.")
+            _internal_problems.append(f"{label}: {detail}")
 
     with requests.Session() as session:
         session.headers.update(geofabrik_auth.HEADERS)
@@ -377,10 +382,16 @@ def process_state(state_key, config):
     failed = status == FAILED
 
     if failed:
-        if not os.path.exists(pbf_path):
-            print(f"[{state_key}] {pbf_name}: {detail}, no previous PBF - skipping state.")
+        has_previous = os.path.exists(pbf_path)
+        detail += (", continuing with the previous PBF" if has_previous
+                   else ", no previous PBF - skipping state")
+        notify.track_failure(f"pbf:{state_key}", f"{pbf_name}: {detail}", threshold=2,
+                             title=f"OSM-Download {state_key.upper()} schlägt fehl")
+        if not has_previous:
+            print(f"[{state_key}] {pbf_name}: {detail}.")
             return False
-        detail += ", continuing with the previous PBF"
+    else:
+        notify.track_success(f"pbf:{state_key}")
 
     if status != DOWNLOADED and os.path.exists(output_parquet):
         pbf_time = os.path.getmtime(pbf_path)
@@ -419,12 +430,16 @@ def process_state(state_key, config):
         if looks_like_corrupt_pbf(e) and os.path.isfile(pbf_path) and not os.path.islink(pbf_path):
             print(f"[{state_key}] PBF appears to be corrupt; deleting {pbf_path} so the next run re-downloads it.")
             _remove_quietly(pbf_path)
+        notify.track_failure(f"extract:{state_key}", f"{pbf_name}: {e}", threshold=2,
+                             title=f"OSM-Import {state_key.upper()} schlägt fehl")
         return False
-    
+
     handler.pbar.close()
-    
+
     if not handler.chunks:
         print(f"[{state_key}] No addresses found.")
+        notify.track_failure(f"extract:{state_key}", f"{pbf_name}: no addresses found",
+                             threshold=2, title=f"OSM-Import {state_key.upper()} schlägt fehl")
         return False
         
     print(f"[{state_key}] Concatenating chunks...")
@@ -444,16 +459,34 @@ def process_state(state_key, config):
     
     full_gdf.to_parquet(output_parquet)
     print(f"[{state_key}] Saved to {output_parquet}")
+    notify.track_success(f"extract:{state_key}")
     return not failed
+
+
+def track_internal_server():
+    """One failed or successful run of the internal server, if it is configured."""
+    if not os.environ.get("GEOFABRIK_OSM_USER"):
+        return
+    problems = list(_internal_problems)
+    if geofabrik_auth.get_download_cookie() is None:  # memoized: no new login here
+        problems.insert(0, "no download cookie (login failed)")
+    if problems:
+        notify.track_failure("geofabrik:internal", "\n".join(problems), threshold=3,
+                             priority="default",
+                             title="Geofabrik: interner Server nicht nutzbar")
+    else:
+        notify.track_success("geofabrik:internal")
 
 
 def main():
     os.makedirs(DATA_DIR, exist_ok=True)
-    
+
     failed_states = []
-    for state_key, config in STATES.items():
-        if not process_state(state_key, config):
-            failed_states.append(state_key)
+    with notify.batch():
+        for state_key, config in STATES.items():
+            if not process_state(state_key, config):
+                failed_states.append(state_key)
+        track_internal_server()
 
     if failed_states:
         print(f"All processing complete. FAILED states: {', '.join(failed_states)}")

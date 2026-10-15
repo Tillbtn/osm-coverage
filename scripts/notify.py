@@ -6,7 +6,8 @@ consecutive failures of one operation across cron runs and only notifies once
 the count reaches its threshold (then at most one reminder per day), and
 track_success() resets the count and sends a short recovery note if an alert
 went out. The counters live in data/.notify_state.json; edit_state() gives
-read-modify-write access to that file.
+read-modify-write access to that file. Inside a batch() block, notifications
+are collected and sent as one message per channel when the block ends.
 
 Configuration via environment (docker compose passes it from deployment/.env):
 
@@ -15,6 +16,9 @@ Configuration via environment (docker compose passes it from deployment/.env):
     NTFY_TOPIC_ALERTS   topic for failures (default: osm-alerts)
     NTFY_TOPIC_ALKIS    topic for new ALKIS data (default: osm-alkis)
     NOTIFY_STATE_FILE   default: data/.notify_state.json
+    NOTIFY_THRESHOLDS   per-key overrides of the alert thresholds, e.g.
+                        "wfs=3,gate=6,pbf:nds=1". A name matches the full key or
+                        its prefix before ':'; the full key wins.
 
 CLI:
     python scripts/notify.py test alerts
@@ -27,6 +31,7 @@ CLI:
 import argparse
 import contextlib
 import datetime
+import functools
 import json
 import os
 import sys
@@ -137,8 +142,90 @@ def _parse_time(value):
         return None
 
 
+_batch = None  # list of pending notifications while a batch() block is open
+
+
+def deliver(channel, title, message, priority, tags, on_sent=None):
+    """send(), or queue the notification while a batch() block is open.
+
+    on_sent runs once the server has accepted the notification.
+    """
+    item = {"channel": channel, "title": title, "message": message,
+            "priority": priority, "tags": tags, "on_sent": on_sent}
+    if _batch is not None:
+        _batch.append(item)
+    else:
+        _send_items(channel, [item])
+
+
+def _send_items(channel, items):
+    """Send one notification for all items, the most urgent one's title first."""
+    items = sorted(items, key=lambda i: PRIORITIES.get(i["priority"], 3), reverse=True)
+    if len(items) == 1:
+        title, message = items[0]["title"], items[0]["message"]
+    else:
+        title = f"{items[0]['title']} (+{len(items) - 1} weitere)"
+        per_item = max(200, MAX_MESSAGE_BYTES // len(items) - 100)
+        message = "\n\n".join(f"{i['title']}\n{_truncate(i['message'], per_item)}"
+                              for i in items)
+    tags = list(dict.fromkeys(t for i in items for t in i["tags"]))
+    if send(channel, title, message, priority=items[0]["priority"], tags=tags):
+        for i in items:
+            if i["on_sent"]:
+                i["on_sent"]()
+
+
+@contextlib.contextmanager
+def batch():
+    """Collect the notifications raised in the block; send one per channel at its end.
+
+    The pending notifications are sent even if the block raises.
+    """
+    global _batch
+    if _batch is not None:  # nested: the outer block sends
+        yield
+        return
+    _batch = []
+    try:
+        yield
+    finally:
+        pending, _batch = _batch, None
+        for channel in dict.fromkeys(i["channel"] for i in pending):
+            _send_items(channel, [i for i in pending if i["channel"] == channel])
+
+
 def _runs(count):
     return f"{count} Fehllauf" if count == 1 else f"{count} Fehlläufe"
+
+
+def _threshold(key, default):
+    """The threshold for `key` from NOTIFY_THRESHOLDS, else `default`."""
+    overrides = _threshold_overrides(os.environ.get("NOTIFY_THRESHOLDS", ""))
+    for name in (key, key.split(":", 1)[0]):
+        if name in overrides:
+            return overrides[name]
+    return default
+
+
+@functools.lru_cache(maxsize=None)  # parse (and warn) once per process
+def _threshold_overrides(spec):
+    overrides = {}
+    for item in spec.split(","):
+        name, _, value = item.strip().partition("=")
+        if not name:
+            continue
+        try:
+            overrides[name.strip()] = int(value)
+        except ValueError:
+            print(f"[notify] Ignoring invalid NOTIFY_THRESHOLDS entry '{item.strip()}'")
+    return overrides
+
+
+def _mark_sent(key, fields, when):
+    with edit_state() as state:
+        entry = state.get("failures", {}).get(key)
+        if entry:
+            entry.update({field: when for field in fields})
 
 
 def track_failure(key, detail, threshold, *, title=None, channel="alerts",
@@ -148,43 +235,44 @@ def track_failure(key, detail, threshold, *, title=None, channel="alerts",
     While the failure persists, a reminder goes out at most every
     `remind_every`. Every call site needs a matching track_success(key), or the
     counter never resets and the next single failure alerts at once.
+    NOTIFY_THRESHOLDS overrides `threshold`.
     """
-    now = _now()
+    threshold = _threshold(key, threshold)
+    now = _now().isoformat()
+    title = title or f"Fehler: {key}"
     with edit_state() as state:
         entry = state.setdefault("failures", {}).setdefault(key, {})
         entry["consecutive"] = entry.get("consecutive", 0) + 1
-        entry.setdefault("first_failed_at", now.isoformat())
+        entry.setdefault("first_failed_at", now)
         entry["last_detail"] = detail
+        entry["title"] = title
         count = entry["consecutive"]
+        alerted = entry.get("alerted_at")
+        last = _parse_time(entry.get("reminded_at")) or _parse_time(alerted)
 
-        title = title or f"Fehler: {key}"
-        body = f"{detail}\n\n{_runs(count)} in Folge, seit {entry['first_failed_at']}."
-        if count < threshold:
-            print(f"[notify] {key}: failure {count} of {threshold} before alerting")
-            return
-        if not entry.get("alerted_at"):
-            if send(channel, title, body, priority=priority, tags=("warning",)):
-                entry["alerted_at"] = entry["reminded_at"] = now.isoformat()
-            return
-        last = _parse_time(entry.get("reminded_at")) or _parse_time(entry.get("alerted_at"))
-        if last is None or now - last >= remind_every:
-            if send(channel, f"Weiterhin: {title}", body, priority=priority, tags=("warning",)):
-                entry["reminded_at"] = now.isoformat()
+    body = f"{_runs(count)} in Folge, seit {entry['first_failed_at']}:\n{detail}"
+    if count < threshold:
+        print(f"[notify] {key}: failure {count} of {threshold} before alerting")
+    elif not alerted:
+        deliver(channel, title, body, priority, ("warning",),
+                 on_sent=lambda: _mark_sent(key, ("alerted_at", "reminded_at"), now))
+    elif last is None or _now() - last >= remind_every:
+        deliver(channel, f"Weiterhin: {title}", body, priority, ("warning",),
+                 on_sent=lambda: _mark_sent(key, ("reminded_at",), now))
 
 
 def track_success(key, *, channel="alerts"):
     """Reset `key`'s failure count; send a recovery note if it had alerted."""
-    state = load_state()
-    entry = state.get("failures", {}).get(key)
-    if not entry:
+    if key not in load_state().get("failures", {}):
         return  # nothing to reset: skip the write on the common path
     with edit_state() as state:
-        entry = state.get("failures", {}).pop(key, None)
-        if entry and entry.get("alerted_at"):
-            send(channel, f"Wieder ok: {key}",
-                 f"Wieder erfolgreich, zuvor {_runs(entry.get('consecutive', 0))} "
-                 f"in Folge seit {entry.get('first_failed_at')}.",
-                 priority="low", tags=("white_check_mark",))
+        entry = state["failures"].pop(key)
+    if entry.get("alerted_at"):
+        deliver(channel, f"Wieder ok: {key}",
+                 f"Behoben: {entry.get('title') or key}. Zuvor "
+                 f"{_runs(entry.get('consecutive', 0))} in Folge seit "
+                 f"{entry.get('first_failed_at')}.",
+                 "low", ("white_check_mark",))
 
 
 def main():

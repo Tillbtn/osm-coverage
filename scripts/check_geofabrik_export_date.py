@@ -15,6 +15,7 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import geofabrik_auth
+import notify
 
 # Configuration matches 03_import_osm.py
 STATES = {
@@ -164,24 +165,30 @@ def main():
     public_session = requests.Session()
     public_session.headers.update(geofabrik_auth.HEADERS)
 
-    for state_key, config in STATES.items():
-        remote_date, source = get_remote_date(config["url"], public_session, internal)
-        local_date = get_local_date(config["history_file"])
+    with notify.batch():
+        for state_key, config in STATES.items():
+            remote_date, source = get_remote_date(config["url"], public_session, internal)
+            local_date = get_local_date(config["history_file"])
 
-        print(f"[{state_key}] Remote ({source}): {remote_date} | Local: {local_date}")
+            print(f"[{state_key}] Remote ({source}): {remote_date} | Local: {local_date}")
         
-        if not remote_date:
-            print(f"[{state_key}] Warning: Could not fetch remote date. Skipping check.")
-            continue
-            
-        if local_date is None:
-            print(f"[{state_key}] No local history. Update needed.")
-            update_needed = True
-        elif remote_date > local_date:
-            print(f"[{state_key}] New data available.")
-            update_needed = True
-        else:
-            print(f"[{state_key}] Up to date.")
+            if not remote_date:
+                print(f"[{state_key}] Warning: Could not fetch remote date. Skipping check.")
+                notify.track_failure(f"gate:{state_key}",
+                                     "No export date on the internal or the public Geofabrik page.",
+                                     threshold=3, priority="default",
+                                     title=f"Geofabrik-Exportdatum {state_key.upper()} nicht lesbar")
+                continue
+            notify.track_success(f"gate:{state_key}")
+
+            if local_date is None:
+                print(f"[{state_key}] No local history. Update needed.")
+                update_needed = True
+            elif remote_date > local_date:
+                print(f"[{state_key}] New data available.")
+                update_needed = True
+            else:
+                print(f"[{state_key}] Up to date.")
 
     if update_needed:
         print("Update required for at least one state.")

@@ -24,3 +24,6 @@ deployment/old/
 # Testing
 testing/
 tests/
+
+docs/
+scripts/helpers/

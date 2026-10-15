@@ -52,4 +52,5 @@ services:
       - NTFY_TOKEN=${NTFY_TOKEN:-}
       - NTFY_TOPIC_ALERTS=${NTFY_TOPIC_ALERTS:-}
       - NTFY_TOPIC_ALKIS=${NTFY_TOPIC_ALKIS:-}
+      - NOTIFY_THRESHOLDS=${NOTIFY_THRESHOLDS:-}
     restart: "no"
