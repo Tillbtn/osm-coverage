@@ -496,6 +496,28 @@ def pbf_ts_to_local(header_ts):
     except (ImportError, ValueError):
         return ts[:19] if len(ts) >= 19 else ts
 
+def replace_atomically(path, write):
+    """Call write(tmp_path), then move the result over path.
+
+    A crash or a full disk mid-write leaves the previous file intact instead of
+    a truncated one - <st>_history.json cannot be regenerated.
+    """
+    tmp = f"{path}.tmp"
+    try:
+        if os.path.exists(tmp):
+            os.remove(tmp)  # leftover from a killed run
+        write(tmp)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+def write_json_atomically(path, data, **kwargs):
+    def write(tmp):
+        with open(tmp, 'w') as f:
+            json.dump(data, f, **kwargs)
+    replace_atomically(path, write)
+
 def main():
     STATES_LIST = ["nds", "nrw", "rlp", "bb", "hh", "he", "st", "sn", "be", "mv"]
     
@@ -1026,10 +1048,9 @@ def main():
             
             out_path = os.path.join(districts_dir, out_filename)
             if len(final_export) > 0:
-                final_export.to_file(out_path, driver="GeoJSON")
+                replace_atomically(out_path, lambda tmp: final_export.to_file(tmp, driver="GeoJSON"))
             else:
-                 with open(out_path, 'w') as f:
-                    json.dump({"type": "FeatureCollection", "features": []}, f)
+                write_json_atomically(out_path, {"type": "FeatureCollection", "features": []})
 
         # State Global Stats
         if not args.district:
@@ -1134,13 +1155,11 @@ def main():
         # Surface the state-wide ALKIS export date so the frontend can show it
         # for the state view and as a fallback for districts without their own.
         history_store["alkis_date"] = state_alkis_date
-        with open(history_file, 'w') as f:
-            json.dump(history_store, f, indent=2)
+        write_json_atomically(history_file, history_store, indent=2)
 
         district_list = list(district_list_map.values())
         district_list.sort(key=lambda x: x['name'])
-        with open(districts_file, 'w') as f:
-            json.dump(district_list, f, indent=2)
+        write_json_atomically(districts_file, district_list, indent=2)
 
         print(f"Successfully processed {state}!")
 

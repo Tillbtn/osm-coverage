@@ -64,7 +64,13 @@ if [ $CHECK_STATUS -eq 0 ]; then
     # Backup state history files
     find site/public/states -name "*_history.json" | while read f; do
          state_name=$(basename "$f" _history.json)
-         cp "$f" "backups/${state_name}_history_$(date +%F).json"
+         dest="backups/${state_name}_history_$(date +%F).json.gz"
+         if gzip -c "$f" > "${dest}.tmp" && mv "${dest}.tmp" "$dest"; then
+             rm -f "${dest%.gz}"
+         else
+             rm -f "${dest}.tmp"
+             echo "Warning: could not back up $f"
+         fi
     done
 
     echo "Update complete."
