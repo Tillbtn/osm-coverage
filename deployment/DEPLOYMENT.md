@@ -59,7 +59,30 @@ Everything here is optional: without credentials, with an expired cookie, or
 when the OSM login form changes, the worker logs the reason and downloads from
 the public server. To go back, delete `deployment/.env`.
 
-## 5. Update
+## 5. Optional: push notifications (ntfy)
+
+`scripts/notify.py` sends alerts to an [ntfy](https://ntfy.sh)
+server. Set it up with `auth-default-access: "deny-all"` and a publish-only
+user for the worker:
+
+```bash
+ntfy user add osm-worker
+ntfy access osm-worker 'osm-*' write-only
+ntfy token add osm-worker      # -> NTFY_TOKEN
+```
+
+Then set `NTFY_URL` (preferably the server's LAN address) and `NTFY_TOKEN` in
+`deployment/.env` and send a test message:
+
+```bash
+docker compose run --rm --entrypoint python worker scripts/notify.py test alerts
+```
+
+Without `NTFY_URL` the worker only logs what it would have sent. Failure
+counters are kept in `data/.notify_state.json`
+(`python scripts/notify.py status`).
+
+## 6. Update
 To update the site with the latest updates:
 
 ```bash

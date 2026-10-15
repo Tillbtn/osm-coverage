@@ -48,4 +48,8 @@ services:
       - TZ=Europe/Berlin
       - GEOFABRIK_OSM_USER=${GEOFABRIK_OSM_USER:-}
       - GEOFABRIK_OSM_PASSWORD=${GEOFABRIK_OSM_PASSWORD:-}
+      - NTFY_URL=${NTFY_URL:-}
+      - NTFY_TOKEN=${NTFY_TOKEN:-}
+      - NTFY_TOPIC_ALERTS=${NTFY_TOPIC_ALERTS:-}
+      - NTFY_TOPIC_ALKIS=${NTFY_TOPIC_ALKIS:-}
     restart: "no"
