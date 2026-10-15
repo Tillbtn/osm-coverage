@@ -53,4 +53,7 @@ services:
       - NTFY_TOPIC_ALERTS=${NTFY_TOPIC_ALERTS:-}
       - NTFY_TOPIC_ALKIS=${NTFY_TOPIC_ALKIS:-}
       - NOTIFY_THRESHOLDS=${NOTIFY_THRESHOLDS:-}
+      - DISK_WARN_GB=${DISK_WARN_GB:-}
+      - DISK_WARN_PCT=${DISK_WARN_PCT:-}
+      - DISK_CRIT_GB=${DISK_CRIT_GB:-}
     restart: "no"

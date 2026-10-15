@@ -10,6 +10,7 @@ import tqdm
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone
 import gc
+import errno
 import hashlib
 import re
 import time
@@ -206,6 +207,13 @@ def _human_size(num_bytes):
     return f"{num_bytes / 1048576:.0f} MB" if num_bytes else "unknown size"
 
 
+def _report_if_disk_full(exc, what):
+    """Alert at once when exc is 'No space left on device'."""
+    if isinstance(exc, OSError) and exc.errno == errno.ENOSPC:
+        notify.track_failure("disk:enospc", f"{what}: {exc}", threshold=1,
+                             priority="urgent", title="Kein Speicherplatz mehr")
+
+
 def _download_from(session, url, local_path, source):
     """One attempt against one server. Returns (status, detail).
 
@@ -295,6 +303,7 @@ def _download_from(session, url, local_path, source):
                             f"in {time.monotonic() - started:.0f} s, {checked}")
     except Exception as e:
         _remove_quietly(part_path)
+        _report_if_disk_full(e, os.path.basename(local_path))
         return FAILED, str(e)
 
 
@@ -427,6 +436,7 @@ def process_state(state_key, config):
         handler.flush_buffer()
     except Exception as e:
         print(f"[{state_key}] Error processing PBF: {e}")
+        _report_if_disk_full(e, f"{state_key} extraction")
         if looks_like_corrupt_pbf(e) and os.path.isfile(pbf_path) and not os.path.islink(pbf_path):
             print(f"[{state_key}] PBF appears to be corrupt; deleting {pbf_path} so the next run re-downloads it.")
             _remove_quietly(pbf_path)

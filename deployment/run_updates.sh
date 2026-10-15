@@ -25,11 +25,21 @@ exec > >(while IFS= read -r line || [ -n "$line" ]; do echo "[$(date '+%Y-%m-%d 
 
 echo "----------------------------------------"
 
-echo "Checking for new data..."
+# Exit 2 = a filesystem is critically full: skip the update so 04 cannot run
+# out of space halfway through writing its outputs.
+python scripts/check_disk.py --preflight
+DISK_STATUS=$?
 
-# Check if update is needed
-python scripts/check_geofabrik_export_date.py
-CHECK_STATUS=$?
+if [ $DISK_STATUS -eq 2 ]; then
+    echo "Disk space critical - skipping the update."
+    CHECK_STATUS=2
+else
+    echo "Checking for new data..."
+
+    # Check if update is needed
+    python scripts/check_geofabrik_export_date.py
+    CHECK_STATUS=$?
+fi
 
 if [ $CHECK_STATUS -eq 0 ]; then
     echo "New data found/Update required. Starting update process..."
@@ -74,7 +84,7 @@ if [ $CHECK_STATUS -eq 0 ]; then
     done
 
     echo "Update complete."
-else
+elif [ $CHECK_STATUS -ne 2 ]; then
     echo "No new data available until next cron run."
 fi
 
