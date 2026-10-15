@@ -145,13 +145,13 @@ def _parse_time(value):
 _batch = None  # list of pending notifications while a batch() block is open
 
 
-def deliver(channel, title, message, priority, tags, on_sent=None):
+def deliver(channel, title, message, priority, tags, on_sent=None, click=None):
     """send(), or queue the notification while a batch() block is open.
 
     on_sent runs once the server has accepted the notification.
     """
     item = {"channel": channel, "title": title, "message": message,
-            "priority": priority, "tags": tags, "on_sent": on_sent}
+            "priority": priority, "tags": tags, "on_sent": on_sent, "click": click}
     if _batch is not None:
         _batch.append(item)
     else:
@@ -169,7 +169,8 @@ def _send_items(channel, items):
         message = "\n\n".join(f"{i['title']}\n{_truncate(i['message'], per_item)}"
                               for i in items)
     tags = list(dict.fromkeys(t for i in items for t in i["tags"]))
-    if send(channel, title, message, priority=items[0]["priority"], tags=tags):
+    click = next((i["click"] for i in items if i["click"]), None)
+    if send(channel, title, message, priority=items[0]["priority"], tags=tags, click=click):
         for i in items:
             if i["on_sent"]:
                 i["on_sent"]()
@@ -229,13 +230,14 @@ def _mark_sent(key, fields, when):
 
 
 def track_failure(key, detail, threshold, *, title=None, channel="alerts",
-                  priority="high", remind_every=DEFAULT_REMIND_EVERY):
+                  priority="high", remind_every=DEFAULT_REMIND_EVERY, show_runs=True):
     """Count one failed run of `key`; alert when the count reaches `threshold`.
 
     While the failure persists, a reminder goes out at most every
     `remind_every`. Every call site needs a matching track_success(key), or the
     counter never resets and the next single failure alerts at once.
-    NOTIFY_THRESHOLDS overrides `threshold`.
+    NOTIFY_THRESHOLDS overrides `threshold`. show_runs=False leaves the
+    "N Fehlläufe in Folge" line out, for checks whose detail already says it.
     """
     threshold = _threshold(key, threshold)
     now = _now().isoformat()
@@ -250,7 +252,8 @@ def track_failure(key, detail, threshold, *, title=None, channel="alerts",
         alerted = entry.get("alerted_at")
         last = _parse_time(entry.get("reminded_at")) or _parse_time(alerted)
 
-    body = f"{_runs(count)} in Folge, seit {entry['first_failed_at']}:\n{detail}"
+    body = (f"{_runs(count)} in Folge, seit {entry['first_failed_at']}:\n{detail}"
+            if show_runs else detail)
     if count < threshold:
         print(f"[notify] {key}: failure {count} of {threshold} before alerting")
     elif not alerted:

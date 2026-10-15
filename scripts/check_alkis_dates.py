@@ -13,6 +13,14 @@ page to render.
   remote_date    : probed cheaply via scripts/alkis_sources.py (no full download).
   update_available: remote_date is newer than processed_date -> reprocess ALKIS.
 
+Notifications (scripts/notify.py), except with --print:
+  - each newer upstream ALKIS stand is announced once on the 'alkis' channel,
+    with the commands to fetch it; WFS sub-sources update on their own and are
+    not announced
+  - a probe that returns no date for 24 runs in a row raises an alert
+  - a state whose comparison reflects an OSM snapshot older than 3 days raises
+    an alert (stale:<state>), whatever the reason the updates stopped
+
 Prints one summary line; --verbose adds the per-state values and is the default
 on a terminal. The hourly cron run stays at the summary line, the values are on
 the status page.
@@ -30,13 +38,19 @@ import argparse
 import collections
 import datetime
 import importlib.util
+import shutil
 
 import requests
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import notify
 
 DATA_DIR = "data"
 STATES_DIR = os.path.join("site", "public", "states")
 OUTPUT_FILE = os.path.join("site", "public", "alkis_status.json")
 STATE_META_KEY = "__state__"
+STALE_AFTER = datetime.timedelta(days=3)
+PROBE_ALERT_THRESHOLD = 24  # hourly runs
 
 _SRC_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alkis_sources.py")
 _spec = importlib.util.spec_from_file_location("alkis_sources", _SRC_PATH)
@@ -239,6 +253,85 @@ def summarize(states):
     return summary
 
 
+def _site_url(path):
+    base = os.environ.get("SITE_URL")
+    return f"{base.rstrip('/')}/{path}" if base else None
+
+
+def _track_probe(key, remote, detail, label):
+    if remote:
+        notify.track_success(key)
+    else:
+        notify.track_failure(key, detail or "The probe returned no date.",
+                             threshold=PROBE_ALERT_THRESHOLD, priority="low",
+                             title=f"ALKIS-Stand {label} nicht abrufbar")
+
+
+def track_probes(states):
+    """Count failed remote-date probes; states without a probe are skipped."""
+    for state, entry in states.items():
+        if SOURCES[state].get("probe", "none") != "none":
+            _track_probe(f"alkis_probe:{state}", entry["remote_date"], entry.get("note"),
+                         entry["name"])
+        for sub in entry.get("sub_sources", []):
+            _track_probe(f"alkis_probe:{state}/{sub['key']}", sub["remote_date"], None,
+                         sub["label"])
+
+
+def _new_data_message(state, entry):
+    src = SOURCES[state]
+    lines = [f"Neuer Stand: {entry['remote_date']} ({entry['remote_source']})",
+             f"Verglichen: {entry.get('processed_date') or '-'}"]
+    script = os.path.join("scripts", f"01_download_alkis_{state}.py")
+    if src.get("automated") and os.path.exists(script):
+        lines.append(f"Download: python {script}")
+    else:
+        lines.append(f"Download manuell: {src.get('download', {}).get('url') or src.get('url')}")
+    lines.append(f"Dann: python scripts/02_extract_alkis.py --state {state.upper()} "
+                 "(04 übernimmt den Stand mit dem nächsten OSM-Stand)")
+    if os.path.isdir(DATA_DIR):
+        lines.append(f"Frei in data/: {shutil.disk_usage(DATA_DIR).free / 1024 ** 3:.1f} GB")
+    return "\n".join(lines)
+
+
+def _mark_announced(state, remote_date):
+    with notify.edit_state() as notify_state:
+        notify_state.setdefault("alkis", {})[state] = remote_date
+
+
+def announce_new_data(states):
+    """Announce each upstream stand newer than the staged/compared one, once."""
+    announced = notify.load_state().get("alkis", {})
+    for state, entry in states.items():
+        remote = entry.get("remote_date")
+        staged = entry.get("extracted_date") or entry.get("processed_date")
+        last = announced.get(state)
+        if not is_newer(remote, staged) or (last and not is_newer(remote, last)):
+            continue
+        notify.deliver("alkis", f"Neue ALKIS-Daten: {entry['name']}",
+                       _new_data_message(state, entry), "default", ("new",),
+                       on_sent=lambda state=state, remote=remote: _mark_announced(state, remote),
+                       click=_site_url("status.html"))
+
+
+def track_staleness(states, now):
+    """Alert while a state's published comparison is older than STALE_AFTER."""
+    for state, entry in states.items():
+        try:
+            osm_date = datetime.datetime.fromisoformat(entry.get("osm_date") or "")
+        except ValueError:
+            continue  # never compared
+        age = now - osm_date
+        if age > STALE_AFTER:
+            notify.track_failure(f"stale:{state}",
+                                 f"Letzter verglichener OSM-Stand: {entry['osm_date']} "
+                                 f"({age.days} Tage alt).",
+                                 threshold=1, show_runs=False,
+                                 title=f"Daten {entry['name']} veraltet")
+        else:
+            notify.track_success(f"stale:{state}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -266,6 +359,11 @@ def main():
     if args.print_only:
         print(text)
         return
+
+    with notify.batch():
+        track_probes(payload["states"])
+        announce_new_data(payload["states"])
+        track_staleness(payload["states"], datetime.datetime.now())
 
     os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
     tmp = f"{OUTPUT_FILE}.tmp"

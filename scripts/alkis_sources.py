@@ -193,7 +193,7 @@ def wfs_sub_sources():
 PROBE_LABELS = {
     "http_last_modified": "HTTP Last-Modified",
     "nrw_index": "opengeodata-Index (timestamp)",
-    "nds_metadata": "GeoSJON-Metadaten",
+    "nds_metadata": "GeoJSON-Metadaten",
     "hh_ckan": "Transparenzportal (CKAN)",
     "mv_atom": "GeoPortal.MV Atom-Feed",
     "sn_changelog": "changelog.xml (HK/HU)",
