@@ -14,29 +14,10 @@ import hashlib
 import osmium
 from shapely import wkb
 
-# German month names -> number, for parsing "Ausgabedatum September 2025" style dates.
-_GERMAN_MONTHS = {
-    "januar": "01", "februar": "02", "märz": "03", "maerz": "03", "april": "04",
-    "mai": "05", "juni": "06", "juli": "07", "august": "08", "september": "09",
-    "oktober": "10", "november": "11", "dezember": "12",
-}
-
-
 def _he_filename_date(name):
-    """
-    Extract the HE Ausgabedatum ('YYYY-MM') from a download filename. Two formats:
-      "...-2026-01.txt"                     -> 2026-01   (current)
-      "...Ausgabedatum September 2025.zip"  -> 2025-09   (older)
-    Returns None if neither matches.
-    """
-    base = name.lower()
-    m = re.search(r"-(\d{4})-(\d{2})(?:\b|\()", base)
-    if m:
-        return f"{m.group(1)}-{m.group(2)}"
-    m = re.search(r"ausgabedatum\s+([a-zäöü]+)\s+(\d{4})", base)
-    if m and m.group(1) in _GERMAN_MONTHS:
-        return f"{m.group(2)}-{_GERMAN_MONTHS[m.group(1)]}"
-    return None
+    """HE Ausgabe ('YYYY/N', older files 'YYYY-MM') from a download filename;
+    shared with the registry's Downloadcenter probe so both report the same scale."""
+    return _load_alkis_sources().he_filename_date(name)
 
 # Configuration
 DATA_DIR = "data"

@@ -20,10 +20,15 @@ Probe strategies (the `probe` field):
   st_page             scrape the LVermGeo open-data page for the "Gebäudereferenzen
                       Stand: MM/YYYY" text (the ZIP's Last-Modified is a nightly
                       rebuild and does NOT reflect the data currency)
+  he_downloadcenter   GET the JSON behind the HVBG Downloadcenter page, Ausgabe
+                      'YYYY/N' from the newest download's name
+  lgb_gazetteer       GET one feature of the LGB gazetteer (OGC API Features) for the
+                      state's landschluessel and read its 'akt' date; the gazetteer
+                      carries the Hauskoordinaten of Brandenburg and Berlin
   none                no cheap remote probe (manual portal / order process)
 
 `automated` reflects whether 01 can fetch the data unattended; a source can be
-automated (RLP, ST) yet still have no per-file date embedded, or manual (HE, SN)
+automated (RLP, ST) yet still have no per-file date embedded, or manual (BB, SN)
 yet carry a date once downloaded (handled post-download by detect_alkis_date in
 02_extract_alkis.py).
 """
@@ -33,6 +38,7 @@ import html
 import json
 import datetime
 import xml.etree.ElementTree as ET
+from urllib.parse import quote
 
 import requests
 
@@ -65,6 +71,12 @@ _MV_ATOM_URL = "https://www.geoportal-mv.de/portal/Geodatenviewer/Datenaktualisi
 _MV_DOWNLOAD_PATTERN = ("https://www.geodaten-mv.de/dienste/alkis_nas_download?index=1&"
                         "dataset=32538df8-6b74-4582-8591-c77e85fbf929&file={id}_SHP_{name}.zip")
 _SN_CHANGELOG_URL = "https://www.geodaten.sachsen.de/changelog.xml"
+# JSON endpoint the Downloadcenter page's script renders from.
+_HE_DOWNLOADCENTER_URL = (
+    "https://gds.hessen.de/INTERSHOP/rest/WFS/HLBG-Geodaten-Site/-/downloadcenter"
+    "?path=Liegenschaftskataster/Hauskoordinaten%20ohne%20Postalische%20Angaben%20(txt)")
+_HE_DOWNLOAD_HOST = "https://gds.hessen.de"
+_LGB_GAZETTEER_URL = "https://ogc-api.geobasis-bb.de/datasets/gaz/collections/Hauskoordinaten"
 
 # The Städteregion Aachen publishes its Gebäudereferenzen as a WFS that refreshes
 # daily — far more current than NRW's state-wide gru_vereinfacht_gpkg product. It
@@ -144,25 +156,32 @@ SOURCES = {
         "note": "Transparenzportal Hamburg; Update quartalsweise",
     },
     "he": {
-        "automated": False, "source_type": "portal",
-        "probe": "none",
+        # The download link carries the request date (/downloadcenter/YYYYMMDD/…)
+        # and 404s on any other day, so 01 reads it fresh from the same JSON.
+        "automated": True, "source_type": "download_center",
+        "probe": "he_downloadcenter",
         "url": ("https://gds.hessen.de/INTERSHOP/web/WFS/HLBG-Geodaten-Site/de_DE/-/EUR/"
                 "ViewDownloadcenter-Start?path=Liegenschaftskataster/"
                 "Hauskoordinaten%20ohne%20Postalische%20Angaben%20(txt)"),
-        "download": {"method": "manual", "url": "https://gds.hessen.de"},
-        "note": "HLBG Downloadcenter; Datum steht auf der Seite, aber nicht automatisch auslesbar",
+        "download": {"method": "he_downloadcenter", "url": _HE_DOWNLOADCENTER_URL},
+        "note": "HVBG Downloadcenter",
     },
     "bb": {
+        # The gazetteer carries the same addresses as the Geobroker product but
+        # lagging street names; 01_download_alkis_bb.py fetches it only as a
+        # fallback. Its 'akt' is the stand of the Geobroker 'aud' column; the
+        # gazetteer metadata promise monthly updates, the Geobroker product
+        # half-yearly ones.
         "automated": False, "source_type": "order",
-        "probe": "none", "url": "https://geobroker.geobasis-bb.de",
+        "probe": "lgb_gazetteer", "url": _LGB_GAZETTEER_URL, "landschluessel": "12",
         "download": {"method": "manual", "url": "https://geobroker.geobasis-bb.de"},
-        "note": "manuelle Bestellung über Geobroker nötig",
+        "note": "Halbjährlich (Stand 31.03./30.09.); Bestellung über Geobroker",
     },
     "be": {
         "automated": False, "source_type": "portal",
-        "probe": "none", "url": "https://gdi.berlin.de/geonetwork",
+        "probe": "lgb_gazetteer", "url": _LGB_GAZETTEER_URL, "landschluessel": "11",
         "download": {"method": "manual", "url": "https://gdi.berlin.de/geonetwork"},
-        "note": "GDI Berlin; Stand in info-be.txt, manueller Download nötig",
+        "note": "Stand aus dem LGB-Gazetteer; Download manuell über GDI Berlin",
     },
     "sn": {
         "automated": False, "source_type": "portal",
@@ -199,6 +218,8 @@ PROBE_LABELS = {
     "sn_changelog": "changelog.xml (HK/HU)",
     "st_page": "Stand Gebäudereferenzen",
     "wfs_field": "WFS (datum_auswertung)",
+    "he_downloadcenter": "Downloadcenter (Ausgabe)",
+    "lgb_gazetteer": "LGB-Gazetteer (akt)",
     "none": None,
 }
 
@@ -346,6 +367,81 @@ def _st_page_date(url, session=None, timeout=60):
     return f"{m.group(2)}-{m.group(1)}" if m else None
 
 
+# German month names -> number, for parsing "Ausgabedatum September 2025" style dates.
+_GERMAN_MONTHS = {
+    "januar": "01", "februar": "02", "märz": "03", "maerz": "03", "april": "04",
+    "mai": "05", "juni": "06", "juli": "07", "august": "08", "september": "09",
+    "oktober": "10", "november": "11", "dezember": "12",
+}
+
+
+def he_filename_date(name):
+    """
+    Extract the HE Ausgabe from a download name. HVBG numbers its releases per
+    year ("2026-01" is Ausgabe 2026/1, published in June), so those come back as
+    'YYYY/N'; only the older "Ausgabedatum <Monat>" names carry a month:
+      "...-2026-01.txt"                     -> 2026/1
+      "HK-2025-2_Hessen_DC.txt"             -> 2025/2
+      "...Ausgabedatum September 2025.zip"  -> 2025-09
+    Returns None if none matches.
+    """
+    base = name.lower()
+    m = (re.search(r"-(\d{4})-(\d{2})(?:\b|\()", base)
+         or re.search(r"\bhk-(\d{4})-(\d)(?!\d)", base))
+    if m:
+        return f"{m.group(1)}/{int(m.group(2))}"
+    m = re.search(r"ausgabedatum\s+([a-zäöü]+)\s+(\d{4})", base)
+    if m and m.group(1) in _GERMAN_MONTHS:
+        return f"{m.group(2)}-{_GERMAN_MONTHS[m.group(1)]}"
+    return None
+
+
+def he_latest_download(session=None, timeout=60):
+    """
+    Newest Hauskoordinaten download listed by the HVBG Downloadcenter, as
+    {name, date, created, url, size}. `url` is absolute and only valid on the
+    day it was fetched. Returns None if nothing is listed.
+    """
+    session = session or requests.Session()
+    resp = session.get(_HE_DOWNLOADCENTER_URL, headers={"Accept": "application/json"},
+                       timeout=timeout)
+    resp.raise_for_status()
+    downloads = (resp.json().get("searchresult") or {}).get("downloads") or []
+    entries = []
+    for d in downloads:
+        uri = (d.get("downloadLink") or {}).get("uri")
+        date = he_filename_date(d.get("name") or "")
+        if uri and date:
+            entries.append({
+                "name": d["name"],
+                "date": date,
+                "created": d.get("creationDate"),
+                "url": _HE_DOWNLOAD_HOST + quote(uri, safe="/()-_.~"),
+                "size": d.get("fileSize"),
+            })
+    return max(entries, key=lambda e: e["date"]) if entries else None
+
+
+def _he_downloadcenter_date(session=None, timeout=60):
+    latest = he_latest_download(session=session, timeout=timeout)
+    return latest["date"] if latest else None
+
+
+def _lgb_gazetteer_date(url, landschluessel, session=None, timeout=60):
+    """
+    'akt' of one Hauskoordinaten feature of the given Land in the LGB gazetteer.
+    The date is uniform per Land, so a single feature is enough.
+    """
+    session = session or requests.Session()
+    resp = session.get(url.rstrip("/") + "/items",
+                       params={"f": "json", "limit": 1, "landschluessel": landschluessel},
+                       headers={"Accept": "application/geo+json"}, timeout=timeout)
+    resp.raise_for_status()
+    feats = resp.json().get("features") or []
+    akt = (feats[0].get("properties") or {}).get("akt") if feats else None
+    return str(akt)[:10] if akt else None
+
+
 def probe_wfs_date(sub, session=None, timeout=60):
     """
     Cheaply read a WFS sub-source's date_field by fetching a single feature (the
@@ -410,6 +506,10 @@ def probe_remote_date(state, session=None):
             return _sn_changelog_date(src["url"], session=session), note
         if probe == "st_page":
             return _st_page_date(src["url"], session=session), note
+        if probe == "he_downloadcenter":
+            return _he_downloadcenter_date(session=session), note
+        if probe == "lgb_gazetteer":
+            return _lgb_gazetteer_date(src["url"], src["landschluessel"], session=session), note
     except Exception as e:
         return None, f"Fernabruf fehlgeschlagen: {e}"
 
