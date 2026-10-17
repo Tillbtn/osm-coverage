@@ -17,9 +17,6 @@ Probe strategies (the `probe` field):
                       the ALKIS entries (MV publishes per-Kreis, updated continuously)
   sn_changelog        GET the geodaten.sachsen.de Atom changelog, newest entry whose
                       title mentions HK (Hauskoordinaten — the address product)
-  st_page             scrape the LVermGeo open-data page for the "Gebäudereferenzen
-                      Stand: MM/YYYY" text (the ZIP's Last-Modified is a nightly
-                      rebuild and does NOT reflect the data currency)
   he_downloadcenter   GET the JSON behind the HVBG Downloadcenter page, Ausgabe
                       'YYYY/N' from the newest download's name
   lgb_gazetteer       GET one feature of the LGB gazetteer (OGC API Features) for the
@@ -34,7 +31,6 @@ yet carry a date once downloaded (handled post-download by detect_alkis_date in
 """
 
 import re
-import html
 import json
 import datetime
 import xml.etree.ElementTree as ET
@@ -64,7 +60,6 @@ _NRW_INDEX_URL = "https://www.opengeodata.nrw.de/produkte/geobasis/lk/akt/gru_ve
 _RLP_ZIP_URL = "https://geobasis-rlp.de/data/hk/current/zip/HAUSKOORDINATEN_RP.zip"
 _ST_ZIP_URL = ("https://geodatenportal.sachsen-anhalt.de/gfds_webshare/download/"
                "LVermGeo/Geodatenportal/externedaten/GBIS_Gebaeude.zip")
-_ST_PAGE_URL = "https://www.lvermgeo.sachsen-anhalt.de/de/gdp-open-data.html"
 # The dataset is re-created under a new id (…hamburg25, …hamburg26) now and
 # then, so it is looked up by name pattern, newest first.
 _HH_CKAN_URL = ("https://suche.transparenz.hamburg.de/api/3/action/package_search"
@@ -140,12 +135,16 @@ SOURCES = {
         "download": {"method": "direct_zip", "url": _RLP_ZIP_URL},
     },
     "st": {
-        # The GBIS_Gebaeude.zip is rebuilt nightly, so its Last-Modified is
-        # always "today" and useless as a data-currency signal. The open-data
-        # page carries the real "Stand: MM/YYYY".
-        "automated": True, "source_type": "direct_zip",
-        "probe": "st_page", "url": _ST_PAGE_URL,
+        # GBIS_Gebaeude.zip is a nightly export of the ALKIS-vereinfacht
+        # GebaeudeBauwerk layer that the OpenData WFS ST_LVermGeo_ALKIS_WFS_OpenData
+        # also serves; it carries changes up to the previous working day. Its
+        # Last-Modified and the XMLs' timeStamp are the date of that export. The
+        # open-data page does not link the ZIP (its "Gebäudereferenzen Stand"
+        # belongs to a different, quarterly product).
+        "automated": True, "source_type": "direct_zip", "cadence": "daily",
+        "probe": "http_last_modified", "url": _ST_ZIP_URL,
         "download": {"method": "direct_zip", "url": _ST_ZIP_URL},
+        "note": "Nächtlicher Export",
     },
     "mv": {
         "automated": True, "source_type": "download_service",
@@ -221,7 +220,6 @@ PROBE_LABELS = {
     "hh_ckan": "Transparenzportal (CKAN)",
     "mv_atom": "GeoPortal.MV Atom-Feed",
     "sn_changelog": "changelog.xml (HK/HU)",
-    "st_page": "Stand Gebäudereferenzen",
     "wfs_field": "WFS (datum_auswertung)",
     "he_downloadcenter": "Downloadcenter (Ausgabe)",
     "lgb_gazetteer": "LGB-Gazetteer (akt)",
@@ -251,7 +249,8 @@ def describe_meta_source(src):
         return src.split(":", 1)[1]
     if src.startswith("column:"):
         return f"GPKG-Spalte „{src.split(':', 1)[1]}“"
-    return {"filename": "Dateiname", "manual": "manuell"}.get(src, src)
+    return {"filename": "Dateiname", "manual": "manuell",
+            "download manifest": "Download-Protokoll (01)"}.get(src, src)
 
 
 def _last_modified_date(url, verify=True, session=None, timeout=30):
@@ -369,17 +368,6 @@ def _sn_changelog_date(url, session=None, timeout=60):
         if stand:
             dates.append(f"{stand.group(3)}-{stand.group(2)}-{stand.group(1)}")
     return max(dates) if dates else None
-
-
-def _st_page_date(url, session=None, timeout=60):
-    """Scrape 'Gebäudereferenzen … Stand: MM/YYYY' -> 'YYYY-MM' from the LVermGeo page."""
-    session = session or requests.Session()
-    resp = session.get(url, timeout=timeout)
-    resp.raise_for_status()
-    text = re.sub(r"<[^>]+>", " ", resp.content.decode("utf-8", "replace"))
-    text = re.sub(r"\s+", " ", html.unescape(text))
-    m = re.search(r"Gebäudereferenzen\s+Stand:?\s*(\d{2})/(\d{4})", text)
-    return f"{m.group(2)}-{m.group(1)}" if m else None
 
 
 # German month names -> number, for parsing "Ausgabedatum September 2025" style dates.
@@ -519,8 +507,6 @@ def probe_remote_date(state, session=None):
             return _mv_atom_date(src["url"], session=session), note
         if probe == "sn_changelog":
             return _sn_changelog_date(src["url"], session=session), note
-        if probe == "st_page":
-            return _st_page_date(src["url"], session=session), note
         if probe == "he_downloadcenter":
             return _he_downloadcenter_date(session=session), note
         if probe == "lgb_gazetteer":

@@ -403,24 +403,25 @@ def _load_alkis_sources():
 
 def detect_alkis_date(state_name, alkis_source_dir):
     """
-    Return (date_str 'YYYY-MM-DD' or 'YYYY-MM', source_label) for the ALKIS data
-    stand.
+    Return (date_str 'YYYY-MM-DD' / 'YYYY-MM' / HE 'YYYY/N', source_label) for
+    the stand of the ALKIS files in `alkis_source_dir`.
 
-    First tries a date embedded in the downloaded source files (offline,
-    authoritative): RLP (HK_OD-RP.csv), BB (gpkg 'aud' column), SN (filename),
-    HE (zip filename), BE (info-be.txt 'Auslesedatum'). If none is found, falls
-    back to the registry's remote freshness probe (scripts/alkis_sources.py) so
-    states whose files embed no date (NDS, NRW, ST, MV, HH) still record the
-    upstream stand they were just built from — the same source the freshness
-    dashboard reads. Returns (None, None) only when both fail.
+    Prefers a date carried by the files themselves: NDS (gpkg.json 'stand',
+    oldest district), RLP (HK_OD.csv Exportdatum), ST (XML timeStamp), MV (ZIP
+    build date), HH (ZIP name), BB (gpkg 'aud' column), SN (file name), HE (file
+    name), BE (info-be.txt 'Auslesedatum'). Otherwise (NRW) the upstream stand
+    01 recorded in the directory's .downloads.json, and only then the
+    registry's remote probe (scripts/alkis_sources.py), which may already be
+    newer than the local files. Returns (None, None) when all fail.
     """
     s = state_name.upper()
     parent = os.path.dirname(alkis_source_dir)
     try:
         if s == "RLP":
-            # HK_OD-RP.csv metadata line: "Exportdatum: 08.01.2026 16:45:39"
-            for meta_csv in glob.glob(os.path.join(alkis_source_dir, "**", "HK_OD-RP.csv"), recursive=True):
-                for enc in ("latin1", "utf-8", "cp1252"):
+            # HK_OD.csv (formerly HK_OD-RP.csv) metadata line:
+            # "Exportdatum: 08.01.2026 16:45:39"
+            for meta_csv in glob.glob(os.path.join(alkis_source_dir, "**", "HK_OD*.csv"), recursive=True):
+                for enc in ("utf-8", "latin1"):
                     try:
                         with open(meta_csv, "r", encoding=enc) as f:
                             for line in f:
@@ -428,11 +429,51 @@ def detect_alkis_date(state_name, alkis_source_dir):
                                     m = re.search(r"(\d{2})\.(\d{2})\.(\d{4})", line)
                                     if m:
                                         d, mo, y = m.groups()
-                                        return f"{y}-{mo}-{d}", "metadata:HK_OD-RP.csv"
+                                        return f"{y}-{mo}-{d}", f"metadata:{os.path.basename(meta_csv)}"
                         break
                     except UnicodeDecodeError:
                         continue
                 break
+
+        elif s == "NDS":
+            # each district ships <name>.gpkg.json with "stand": "2026-10-07"; the
+            # oldest district is the stand the whole state is at least at
+            stands = []
+            for meta in glob.glob(os.path.join(alkis_source_dir, "*", "*.gpkg.json")):
+                with open(meta, "rb") as f:
+                    m = re.search(rb'"stand"\s*:\s*"(\d{4}-\d{2}-\d{2})', f.read(8192))
+                if m:
+                    stands.append(m.group(1).decode())
+            if stands:
+                return min(stands), "metadata:gpkg.json stand"
+
+        elif s == "MV":
+            # the download service builds the Gemeinde ZIPs in batches; the newest
+            # member date is when the newest of the local ZIPs was built
+            dates = []
+            for z in glob.glob(os.path.join(alkis_source_dir, "*.zip")):
+                with zipfile.ZipFile(z) as zf:
+                    dates += [datetime.date(*i.date_time[:3]) for i in zf.infolist()]
+            if dates:
+                return max(dates).isoformat(), "metadata:ZIP build date"
+
+        elif s == "ST":
+            # GBIS XML root: <wfs:FeatureCollection timeStamp="2026-09-08T05:25:29…"
+            stamps = []
+            for xml in glob.glob(os.path.join(alkis_source_dir, "**", "*.xml"), recursive=True):
+                with open(xml, "rb") as f:
+                    m = re.search(rb'timeStamp="(\d{4}-\d{2}-\d{2})', f.read(2048))
+                if m:
+                    stamps.append(m.group(1).decode())
+            if stamps:
+                return max(stamps), "metadata:XML timeStamp"
+
+        elif s == "HH":
+            # process_hh reads the GML of the newest ALKIS_Adressen_HH_<date>.zip
+            z = _newest_hh_zip(alkis_source_dir)
+            m = re.search(r"(\d{4}-\d{2}-\d{2})", os.path.basename(z)) if z else None
+            if m:
+                return m.group(1), "filename"
 
         elif s == "BB":
             gpkg = os.path.join(alkis_source_dir, "adressen-bb.gpkg")
@@ -477,8 +518,17 @@ def detect_alkis_date(state_name, alkis_source_dir):
     except Exception as e:
         print(f"[{state_name}] Could not detect ALKIS date: {e}")
 
-    # No file-embedded date: fall back to the upstream freshness probe (same
-    # source the dashboard uses). Best-effort — network failures leave it null.
+    # No file-embedded date: use the upstream stand 01 recorded for the files it
+    # downloaded, else the upstream freshness probe (same source the dashboard
+    # uses; it may already be newer than the local files). Best-effort —
+    # network failures leave it null.
+    try:
+        import alkis_download as dl
+        stand = dl.Manifest(alkis_source_dir).stand()
+        if stand:
+            return stand, "download manifest"
+    except Exception as e:
+        print(f"[{state_name}] Could not read the download manifest: {e}")
     try:
         srcs = _load_alkis_sources()
         key = state_name.lower()

@@ -16,7 +16,7 @@ page to render.
 Notifications (scripts/notify.py), except with --print:
   - each newer upstream ALKIS stand is announced once on the 'alkis' channel,
     with the commands to fetch it; WFS sub-sources update on their own and are
-    not announced
+    not announced, nightly exports (ST) only every DAILY_ANNOUNCE_DAYS
   - a probe that returns no date for 24 runs in a row raises an alert
   - a state whose comparison reflects an OSM snapshot older than 3 days raises
     an alert (stale:<state>), whatever the reason the updates stopped
@@ -51,6 +51,7 @@ OUTPUT_FILE = os.path.join("site", "public", "alkis_status.json")
 STATE_META_KEY = "__state__"
 STALE_AFTER = datetime.timedelta(days=3)
 PROBE_ALERT_THRESHOLD = 24  # hourly runs
+DAILY_ANNOUNCE_DAYS = 30
 
 _SRC_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alkis_sources.py")
 _spec = importlib.util.spec_from_file_location("alkis_sources", _SRC_PATH)
@@ -299,14 +300,35 @@ def _mark_announced(state, remote_date):
         notify_state.setdefault("alkis", {})[state] = remote_date
 
 
+def _days_between(older, newer):
+    """Whole days from `older` to `newer` ('YYYY-MM-DD'), or None if unparsable."""
+    try:
+        return (datetime.date.fromisoformat(newer[:10]) - datetime.date.fromisoformat(older[:10])).days
+    except (TypeError, ValueError):
+        return None
+
+
+def _due(remote, since, daily):
+    """`remote` is newer than `since` — for a nightly export, by DAILY_ANNOUNCE_DAYS."""
+    if not daily:
+        return is_newer(remote, since)
+    days = _days_between(since, remote)
+    return days is not None and days >= DAILY_ANNOUNCE_DAYS
+
+
 def announce_new_data(states):
-    """Announce each upstream stand newer than the staged/compared one, once."""
+    """
+    Announce each upstream stand newer than the staged/compared one, once.
+    Sources exported every night (cadence 'daily') are announced only once the
+    local data and the last announcement are DAILY_ANNOUNCE_DAYS old.
+    """
     announced = notify.load_state().get("alkis", {})
     for state, entry in states.items():
         remote = entry.get("remote_date")
         staged = entry.get("extracted_date") or entry.get("processed_date")
         last = announced.get(state)
-        if not is_newer(remote, staged) or (last and not is_newer(remote, last)):
+        daily = SOURCES[state].get("cadence") == "daily"
+        if not _due(remote, staged, daily) or (last and not _due(remote, last, daily)):
             continue
         notify.deliver("alkis", f"Neue ALKIS-Daten: {entry['name']}",
                        _new_data_message(state, entry), "default", ("new",),
