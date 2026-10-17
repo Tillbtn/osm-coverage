@@ -5,6 +5,7 @@ import glob
 import json
 import datetime
 import zipfile
+import shutil
 import geopandas as gpd
 import pandas as pd
 import tqdm
@@ -441,15 +442,9 @@ def detect_alkis_date(state_name, alkis_source_dir):
                     return str(g["aud"].iloc[0])[:10], "column:aud"
 
         elif s == "SN":
-            # filename: hk_sn_adressen_20260402.txt
-            candidates = (glob.glob(os.path.join(alkis_source_dir, "*.txt")) +
-                          glob.glob(os.path.join(alkis_source_dir, "*.csv")) +
-                          glob.glob(os.path.join(parent, "*.txt")))
-            for f in candidates:
-                base = os.path.basename(f)
-                if base.startswith("old_"):
-                    continue
-                m = re.search(r"(\d{4})(\d{2})(\d{2})", base)
+            # filename of the file process_sn reads: hk_sn_adressen_20260402.txt
+            for f in _sn_data_files(alkis_source_dir):
+                m = re.search(r"(\d{4})(\d{2})(\d{2})", os.path.basename(f))
                 if m:
                     return f"{m.group(1)}-{m.group(2)}-{m.group(3)}", "filename"
 
@@ -1035,26 +1030,33 @@ def _parse_hh_inspire(gml_path, ns):
     return data
 
 
+def _newest_hh_zip(directory):
+    """The ZIP with the newest YYYY-MM-DD in its name (ALKIS_Adressen_HH_2026-10-02.zip), else
+    the most recently modified one, or None."""
+    zips = glob.glob(os.path.join(directory, "*.zip"))
+    dated = [(m.group(1), z) for z in zips
+             if (m := re.search(r"(\d{4}-\d{2}-\d{2})", os.path.basename(z)))]
+    if dated:
+        return max(dated)[1]
+    return max(zips, key=os.path.getmtime) if zips else None
+
+
 def process_hh(directory):
-    # 1. Check for GML files directly
-    gmls = glob.glob(os.path.join(directory, "*.gml"))
-    gmls += glob.glob(os.path.join(directory, "*.GML"))
-    
-    # 2. Check for ZIP
-    if not gmls:
-        zips = glob.glob(os.path.join(directory, "*.zip"))
-        if zips:
-             for z in zips:
-                 try:
-                     print(f"[HH] Extracting {z}...")
-                     with zipfile.ZipFile(z, 'r') as zf:
-                         # Extract only GMLs if possible, to avoid clutter
-                         for n in zf.namelist():
-                             if n.lower().endswith('.gml'):
-                                 zf.extract(n, directory)
-                 except Exception as e:
-                     print(f"[HH] Error extracting {z}: {e}")
-        
+    gmls = glob.glob(os.path.join(directory, "*.gml")) + glob.glob(os.path.join(directory, "*.GML"))
+
+    # unpack the GML of the newest ZIP when it is newer than the GML lying there
+    z = _newest_hh_zip(directory)
+    if z and (not gmls or any(os.path.getmtime(z) > os.path.getmtime(g) for g in gmls)):
+        print(f"[HH] Extracting {os.path.basename(z)}...")
+        with zipfile.ZipFile(z) as zf:
+            members = [n for n in zf.namelist() if n.lower().endswith('.gml')]
+            if not members:
+                raise RuntimeError(f"[HH] {z} contains no GML")
+            for g in gmls:
+                os.remove(g)
+            for n in members:
+                with zf.open(n) as src, open(os.path.join(directory, os.path.basename(n)), "wb") as dst:
+                    shutil.copyfileobj(src, dst, 1 << 20)
         gmls = glob.glob(os.path.join(directory, "*.gml"))
 
     if not gmls:
@@ -1312,11 +1314,24 @@ def process_st(directory):
     return results
 
 
+def _sn_data_files(directory):
+    """
+    The SN file(s) to read: of the *.txt / *.csv in `directory` (else its
+    parent), only the one with the newest YYYYMMDD in its name
+    (hk_sn_adressen_20260924.txt), so an older release lying next to it is not
+    read as well. Files without a date are used only if none has one.
+    """
+    for d in (directory, os.path.dirname(directory)):
+        files = glob.glob(os.path.join(d, "*.csv")) + glob.glob(os.path.join(d, "*.txt"))
+        if files:
+            break
+    dated = [(m.group(1), f) for f in files
+             if (m := re.search(r"(\d{8})", os.path.basename(f)))]
+    return [max(dated)[1]] if dated else files
+
+
 def process_sn(directory):
-    data_files = glob.glob(os.path.join(directory, "*.csv")) + glob.glob(os.path.join(directory, "*.txt"))
-    if not data_files:
-        data_files = glob.glob(os.path.join(os.path.dirname(directory), "*.csv")) + glob.glob(os.path.join(os.path.dirname(directory), "*.txt"))
-        
+    data_files = _sn_data_files(directory)
     if not data_files:
         print(f"[SN] No CSV or TXT files found in {directory}.")
         return []

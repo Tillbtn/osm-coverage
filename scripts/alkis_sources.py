@@ -11,8 +11,8 @@ Probe strategies (the `probe` field):
   http_last_modified  HEAD the file, parse the HTTP Last-Modified header
   nrw_index           GET the opengeodata index, take max of <file timestamp=...>
   nds_metadata        GET the metadata GeoJSON, take max of the aktualitaet field
-  hh_ckan             GET the transparenz.hamburg.de CKAN dataset, newest YYYY-MM
-                      embedded in the "Download ALKIS Adressen …" resource names
+  hh_ckan             search the transparenz.hamburg.de CKAN for the current ALKIS
+                      Adressen dataset, newest YYYY-MM-DD in its ZIP file names
   mv_atom             GET the GeoPortal.MV update Atom feed, newest <updated> among
                       the ALKIS entries (MV publishes per-Kreis, updated continuously)
   sn_changelog        GET the geodaten.sachsen.de Atom changelog, newest entry whose
@@ -65,12 +65,16 @@ _RLP_ZIP_URL = "https://geobasis-rlp.de/data/hk/current/zip/HAUSKOORDINATEN_RP.z
 _ST_ZIP_URL = ("https://geodatenportal.sachsen-anhalt.de/gfds_webshare/download/"
                "LVermGeo/Geodatenportal/externedaten/GBIS_Gebaeude.zip")
 _ST_PAGE_URL = "https://www.lvermgeo.sachsen-anhalt.de/de/gdp-open-data.html"
-_HH_CKAN_URL = ("https://suche.transparenz.hamburg.de/api/3/action/"
-                "package_show?id=alkis-adressen-hamburg26")
+# The dataset is re-created under a new id (…hamburg25, …hamburg26) now and
+# then, so it is looked up by name pattern, newest first.
+_HH_CKAN_URL = ("https://suche.transparenz.hamburg.de/api/3/action/package_search"
+                "?q=name:alkis-adressen-hamburg*&sort=metadata_modified%20desc&rows=1")
 _MV_ATOM_URL = "https://www.geoportal-mv.de/portal/Geodatenviewer/Datenaktualisierungen/Atom"
 _MV_DOWNLOAD_PATTERN = ("https://www.geodaten-mv.de/dienste/alkis_nas_download?index=1&"
                         "dataset=32538df8-6b74-4582-8591-c77e85fbf929&file={id}_SHP_{name}.zip")
 _SN_CHANGELOG_URL = "https://www.geodaten.sachsen.de/changelog.xml"
+_SN_ZIP_URL = ("https://geocloud.landesvermessung.sachsen.de/public.php/dav/files/"
+               "B3HnXbDDgAkw69a/hk_sn_ascii.zip")
 # JSON endpoint the Downloadcenter page's script renders from.
 _HE_DOWNLOADCENTER_URL = (
     "https://gds.hessen.de/INTERSHOP/rest/WFS/HLBG-Geodaten-Site/-/downloadcenter"
@@ -150,9 +154,9 @@ SOURCES = {
         "note": "Fortlaufend je Landkreis aktualisiert",
     },
     "hh": {
-        "automated": False, "source_type": "portal",
+        "automated": True, "source_type": "portal",
         "probe": "hh_ckan", "url": _HH_CKAN_URL,
-        "download": {"method": "manual", "url": "https://suche.transparenz.hamburg.de/dataset/alkis-adressen-hamburg26"},
+        "download": {"method": "hh_ckan", "url": _HH_CKAN_URL},
         "note": "Transparenzportal Hamburg; Update quartalsweise",
     },
     "he": {
@@ -184,10 +188,11 @@ SOURCES = {
         "note": "Stand aus dem LGB-Gazetteer; Download manuell über GDI Berlin",
     },
     "sn": {
-        "automated": False, "source_type": "portal",
+        # public share linked from the Downloadbereich Hauskoordinaten
+        "automated": True, "source_type": "direct_zip",
         "probe": "sn_changelog", "url": _SN_CHANGELOG_URL,
-        "download": {"method": "manual", "url": "https://www.geodaten.sachsen.de"},
-        "note": "Downloadbereich Hauskoordinaten, Download manuell",
+        "download": {"method": "direct_zip", "url": _SN_ZIP_URL},
+        "note": "Downloadbereich Hauskoordinaten (GeoSN)",
     },
 }
 
@@ -295,19 +300,29 @@ def _nds_metadata_date(url, session=None, timeout=120):
     return max(dates) if dates else None
 
 
-def _hh_ckan_date(url, session=None, timeout=60):
-    """Newest YYYY-MM embedded in the CKAN dataset's ALKIS resource names."""
+def hh_latest_download(session=None, timeout=60):
+    """
+    Newest ALKIS_Adressen_HH_<YYYY-MM-DD>.zip of the current CKAN dataset, as
+    {url, name, date, size}, or None. The date comes from the file name: the
+    resource names do not always match it ("2020-04" links the 2019-04 file).
+    """
     session = session or requests.Session()
-    resp = session.get(url, timeout=timeout)
+    resp = session.get(_HH_CKAN_URL, timeout=timeout)
     resp.raise_for_status()
-    resources = (resp.json().get("result") or {}).get("resources", [])
-    dates = set()
-    for r in resources:
-        name = (r.get("name") or "").upper()
-        m = re.search(r"(\d{4}-\d{2})", name)
-        if "ALKIS" in name and m:
-            dates.add(m.group(1))
-    return max(dates) if dates else None
+    results = (resp.json().get("result") or {}).get("results") or []
+    entries = []
+    for r in (results[0].get("resources") or []) if results else []:
+        url = r.get("url") or ""
+        m = re.search(r"/(ALKIS_Adressen_HH_(\d{4}-\d{2}-\d{2})\.zip)$", url)
+        if m:
+            entries.append({"url": url, "name": m.group(1), "date": m.group(2),
+                            "size": int(r["size"]) if r.get("size") else None})
+    return max(entries, key=lambda e: e["date"]) if entries else None
+
+
+def _hh_ckan_date(session=None, timeout=60):
+    latest = hh_latest_download(session=session, timeout=timeout)
+    return latest["date"] if latest else None
 
 
 def _mv_atom_date(url, session=None, timeout=60):
@@ -499,7 +514,7 @@ def probe_remote_date(state, session=None):
         if probe == "nds_metadata":
             return _nds_metadata_date(src["url"], session=session), note
         if probe == "hh_ckan":
-            return _hh_ckan_date(src["url"], session=session), note
+            return _hh_ckan_date(session=session), note
         if probe == "mv_atom":
             return _mv_atom_date(src["url"], session=session), note
         if probe == "sn_changelog":
