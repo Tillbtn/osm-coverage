@@ -801,7 +801,10 @@ def process_bb(directory):
         
         def format_bb_housenumber(row):
             hnr = str(row['hnr'])
-            adz = str(row['adz']) if pd.notna(row['adz']) and row['adz'] != '' else ""
+            # Geobroker exports up to the 2026-03-31 stand had lower-case adz ("a",
+            # "p1"), later ones upper-case ("A", "P1"). Lower-casing keeps the
+            # housenumber, and with it alkis_id, the same across both.
+            adz = str(row['adz']).lower() if pd.notna(row['adz']) and row['adz'] != '' else ""
             
             if not adz:
                 return hnr
