@@ -1,65 +1,55 @@
+"""
+Download the RLP Hauskoordinaten ZIP and unpack it to
+data/rlp/alkis/HAUSKOORDINATEN_RP/ (what 02 reads).
+
+Skips the download when the remote ZIP (size/ETag/Last-Modified) matches the one
+recorded in data/rlp/alkis/.downloads.json, and the unpacking when the directory
+is newer than the ZIP. A failed download or unpack leaves the previous data in place.
+
+Usage:
+    python scripts/01_download_alkis_rlp.py [--force]
+"""
+
 import os
 import sys
-import requests
-import zipfile
-import shutil
-import tqdm
+import argparse
 
-# Download URL is loaded from scripts/alkis_sources.py.
+import requests
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import alkis_sources
+import alkis_download as dl
 
-# Configuration
-DOWNLOAD_URL = alkis_sources.download_url("rlp")
-DATA_DIR = "data"
-RLP_ALKIS_DIR = os.path.join(DATA_DIR, "rlp", "alkis")
-TARGET_DIR = os.path.join(RLP_ALKIS_DIR, "HAUSKOORDINATEN_RP")
+SOURCE = alkis_sources.SOURCES["rlp"]["download"]
+ALKIS_DIR = os.path.join("data", "rlp", "alkis")
+ZIP_NAME = "HAUSKOORDINATEN_RP.zip"
+TARGET_DIR = os.path.join(ALKIS_DIR, "HAUSKOORDINATEN_RP")
+
 
 def main():
-    os.makedirs(RLP_ALKIS_DIR, exist_ok=True)
-    
-    zip_filename = "HAUSKOORDINATEN_RP.zip"
-    zip_path = os.path.join(RLP_ALKIS_DIR, zip_filename)
-    
-    print(f"Downloading {DOWNLOAD_URL}...")
-    try:
-        # Disable SSL verification to handle cert issues
-        requests.packages.urllib3.disable_warnings()
-        response = requests.get(DOWNLOAD_URL, stream=True, verify=False)
-        response.raise_for_status()
-        
-        total_size = int(response.headers.get('content-length', 0))
-        block_size = 1024
-        
-        with open(zip_path, 'wb') as f, tqdm.tqdm(
-            desc="Downloading",
-            total=total_size,
-            unit='iB',
-            unit_scale=True,
-            unit_divisor=1024,
-        ) as bar:
-            for data in response.iter_content(block_size):
-                size = f.write(data)
-                bar.update(size)
-                
-        print("Download complete.")
-        
-        print(f"Extracting to {TARGET_DIR}...")
-        if os.path.exists(TARGET_DIR):
-             shutil.rmtree(TARGET_DIR)
-        os.makedirs(TARGET_DIR, exist_ok=True)
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--force", action="store_true", help="download and unpack even if unchanged")
+    args = parser.parse_args()
 
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(TARGET_DIR)
-            
-        print("Extraction complete.")
-        
-        # Cleanup ZIP
-        os.remove(zip_path)
-        print("Removed ZIP file.")
-        
-    except Exception as e:
-        print(f"Error executing download/extraction: {e}")
+    os.makedirs(ALKIS_DIR, exist_ok=True)
+    session = requests.Session()
+    verify = SOURCE.get("verify", True)
+    manifest = dl.Manifest(ALKIS_DIR)
+    remote = dl.head_attrs(SOURCE["url"], session=session, verify=verify)
+    print(f"[RLP] {SOURCE['url']}: {remote['size']} bytes, Last-Modified {remote['last_modified']}")
+    if dl.fetch(SOURCE["url"], ALKIS_DIR, ZIP_NAME, manifest, remote=remote, session=session,
+                verify=verify, force=args.force, stand=dl.http_date(remote["last_modified"])):
+        manifest.save()
+
+    zip_path = os.path.join(ALKIS_DIR, ZIP_NAME)
+    if args.force or dl.needs_extract(zip_path, TARGET_DIR):
+        print(f"[RLP] Unpacking to {TARGET_DIR}")
+        dl.extract_zip(zip_path, TARGET_DIR)
+        print("[RLP] Done. Next: python scripts/02_extract_alkis.py --state RLP")
+    else:
+        print(f"[RLP] {TARGET_DIR} is up to date.")
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

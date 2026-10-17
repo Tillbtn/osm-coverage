@@ -1,62 +1,61 @@
+"""
+Download the ST GBIS_Gebaeude ZIP and unpack it to
+data/st/alkis/GBIS_Gebaeude/ (what 02 reads).
+
+The ZIP is rebuilt every night, so its Last-Modified and the timeStamp in the
+XMLs are the date of that build. The ZIP (~180 MB) is not kept: the unpacked
+directory is replaced as a whole, which also drops stale GDAL .gfs files.
+
+Usage:
+    python scripts/01_download_alkis_st.py [--force]
+"""
+
 import os
 import sys
-import requests
-import zipfile
-import shutil
-import tqdm
+import argparse
 
-# Download URL is loaded from scripts/alkis_sources.py.
+import requests
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import alkis_sources
+import alkis_download as dl
 
-# Configuration
-DOWNLOAD_URL = alkis_sources.download_url("st")
-DATA_DIR = "data/st/alkis"
-ZIP_FILENAME = "GBIS_Gebaeude.zip"
+URL = alkis_sources.download_url("st")
+ALKIS_DIR = os.path.join("data", "st", "alkis")
+ZIP_NAME = "GBIS_Gebaeude.zip"
+TARGET_DIR = os.path.join(ALKIS_DIR, "GBIS_Gebaeude")
+
 
 def main():
-    os.makedirs(DATA_DIR, exist_ok=True)
-    zip_path = os.path.join(DATA_DIR, ZIP_FILENAME)
-    
-    print(f"Downloading {DOWNLOAD_URL}...")
-    try:
-        response = requests.get(DOWNLOAD_URL, stream=True)
-        response.raise_for_status()
-        
-        total_size = int(response.headers.get('content-length', 0))
-        block_size = 1024
-        
-        with open(zip_path, 'wb') as f, tqdm.tqdm(
-            desc="Downloading",
-            total=total_size,
-            unit='iB',
-            unit_scale=True,
-            unit_divisor=1024,
-        ) as bar:
-            for data in response.iter_content(block_size):
-                size = f.write(data)
-                bar.update(size)
-                
-        print("Download complete.")
-        
-        print(f"Extracting to {DATA_DIR}...")
-        
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            first_item = zip_ref.namelist()[0]
-            if "/" in first_item:
-                zip_ref.extractall(DATA_DIR)
-            else:
-                target_subdir = os.path.join(DATA_DIR, "GBIS_Gebaeude")
-                os.makedirs(target_subdir, exist_ok=True)
-                zip_ref.extractall(target_subdir)
-                 
-        print("Extraction complete.")
-        
-        os.remove(zip_path)
-        print("Removed ZIP file.")
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--force", action="store_true",
+                        help="download even if the local data is from the same build")
+    args = parser.parse_args()
 
-    except Exception as e:
-        print(f"Error: {e}")
+    os.makedirs(ALKIS_DIR, exist_ok=True)
+    session = requests.Session()
+    manifest = dl.Manifest(ALKIS_DIR)
+    remote = dl.head_attrs(URL, session=session)
+    stand = dl.http_date(remote["last_modified"])
+    print(f"[ST] {URL}: {remote['size']} bytes, built {remote['last_modified']}")
+    if (not args.force and os.path.isdir(TARGET_DIR)
+            and manifest.get(ZIP_NAME).get("etag") == remote["etag"]):
+        print(f"[ST] {TARGET_DIR} is from this build already, nothing to do.")
+        return 0
+
+    zip_path = os.path.join(ALKIS_DIR, ZIP_NAME)
+    dl.download(URL, zip_path, session=session, expected_size=remote["size"])
+    print(f"[ST] Unpacking to {TARGET_DIR}")
+    try:
+        dl.extract_zip(zip_path, TARGET_DIR)
+    finally:
+        os.remove(zip_path)
+    manifest.record(ZIP_NAME, url=URL, size=remote["size"], etag=remote["etag"],
+                    last_modified=remote["last_modified"], stand=stand)
+    manifest.save()
+    print("[ST] Done. Next: python scripts/02_extract_alkis.py --state ST")
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

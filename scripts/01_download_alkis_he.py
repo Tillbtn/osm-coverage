@@ -22,10 +22,10 @@ import zipfile
 import argparse
 
 import requests
-import tqdm
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import alkis_sources
+import alkis_download as dl
 
 ALKIS_DIR = os.path.join("data", "he", "alkis")
 
@@ -34,23 +34,6 @@ def extracted_dates():
     """Ausgabe dates of the .txt files 02 would read."""
     return {p: alkis_sources.he_filename_date(os.path.basename(p))
             for p in glob.glob(os.path.join(ALKIS_DIR, "*.txt"))}
-
-
-def download(url, zip_path, session):
-    """Stream to '<zip>.part', check the length, then move into place."""
-    part = zip_path + ".part"
-    with session.get(url, stream=True, timeout=60) as resp:
-        resp.raise_for_status()
-        total = int(resp.headers.get("content-length", 0))
-        with open(part, "wb") as f, tqdm.tqdm(desc="Downloading", total=total, unit="iB",
-                                              unit_scale=True, unit_divisor=1024) as bar:
-            for chunk in resp.iter_content(1 << 20):
-                bar.update(f.write(chunk))
-    got = os.path.getsize(part)
-    if total and got != total:
-        os.remove(part)
-        raise IOError(f"incomplete download: {got} of {total} bytes")
-    os.replace(part, zip_path)
 
 
 def main():
@@ -76,7 +59,7 @@ def main():
     zip_path = os.path.join(ALKIS_DIR, latest["name"] + ".zip")
     txt_path = os.path.join(ALKIS_DIR, latest["name"] + ".txt")
     print(f"[HE] Downloading {latest['url']}")
-    download(latest["url"], zip_path, session)
+    dl.download(latest["url"], zip_path, session=session)
 
     with zipfile.ZipFile(zip_path) as zf:
         members = [m for m in zf.namelist() if m.lower().endswith(".txt")]

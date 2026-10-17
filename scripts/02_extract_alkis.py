@@ -1,5 +1,6 @@
 
 import os
+import sys
 import glob
 import json
 import datetime
@@ -13,6 +14,9 @@ from shapely.geometry import Point
 import hashlib
 import osmium
 from shapely import wkb
+
+# sibling helpers (alkis_download) also when 02 is loaded by path from elsewhere
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 def _he_filename_date(name):
     """HE Ausgabe ('YYYY/N', older files 'YYYY-MM') from a download filename;
@@ -493,6 +497,30 @@ def detect_alkis_date(state_name, alkis_source_dir):
     return None, None
 
 
+def unpack_new_zips(directory, label, keep=None):
+    """
+    Unpack each ZIP in `directory` into '<name without .zip>/' when the ZIP is
+    newer than that directory (a fresh download), replacing its contents; with
+    `keep`, only the members it returns True for. A ZIP that cannot be unpacked
+    aborts the state instead of silently dropping its district.
+    """
+    import alkis_download as dl
+    zips = [z for z in glob.glob(os.path.join(directory, "*.zip"))
+            if dl.needs_extract(z, os.path.splitext(z)[0])]
+    failed = []
+    for z in tqdm.tqdm(zips, desc=f"Extracting {label} Zips", disable=not zips):
+        try:
+            members = None
+            if keep:
+                with zipfile.ZipFile(z) as zf:
+                    members = [n for n in zf.namelist() if keep(n)]
+            dl.extract_zip(z, os.path.splitext(z)[0], members=members)
+        except Exception as e:
+            failed.append(f"{os.path.basename(z)}: {e}")
+    if failed:
+        raise RuntimeError(f"[{label}] Could not unpack {len(failed)} ZIP(s): " + "; ".join(failed))
+
+
 def process_state(state_name, state_dir, process_func):
     alkis_source_dir = os.path.join(state_dir, "alkis")
     output_file = os.path.join(state_dir, "alkis.parquet")
@@ -552,15 +580,8 @@ def process_state(state_name, state_dir, process_func):
 def process_nds(directory):
     # nds: Zips containing GPKGs
     results = []
-    zips = glob.glob(os.path.join(directory, "*.zip"))
-    for z in tqdm.tqdm(zips, desc="Extracting NDS Zips"):
-        folder = os.path.splitext(z)[0]
-        if not os.path.exists(folder):
-            try:
-                with zipfile.ZipFile(z, 'r') as zf:
-                    zf.extractall(folder)
-            except: pass
-            
+    unpack_new_zips(directory, "NDS")
+
     gpkgs = glob.glob(os.path.join(directory, "**/*.gpkg"), recursive=True)
     print(f"Found {len(gpkgs)} potential GPKG files/dirs in {directory}")
     for gpath in tqdm.tqdm(gpkgs, desc="Processing NDS GPKGs"):
@@ -601,15 +622,8 @@ def process_nds(directory):
 def process_nrw(directory):
 
     results = []
-    zips = glob.glob(os.path.join(directory, "*.zip"))
-    for z in tqdm.tqdm(zips, desc="Extracting NRW Zips"):
-        folder = os.path.splitext(z)[0]
-        if not os.path.exists(folder):
-            try:
-                with zipfile.ZipFile(z, 'r') as zf:
-                    zf.extractall(folder)
-            except: pass
-            
+    unpack_new_zips(directory, "NRW")
+
     gpkgs = glob.glob(os.path.join(directory, "**/*.gpkg"), recursive=True)
     for gpath in tqdm.tqdm(gpkgs, desc="Processing NRW GPKGs"):
         try:
@@ -1445,16 +1459,9 @@ def process_mv(directory):
     # Determine which names are duplicates across different IDs
     duplicate_names = {name for name, ids in all_names.items() if len(ids) > 1}
 
-    zips = glob.glob(os.path.join(directory, "*.zip"))
-    for z in tqdm.tqdm(zips, desc="Extracting MV Zips"):
-        folder = os.path.splitext(z)[0]
-        if not os.path.exists(folder):
-            try:
-                with zipfile.ZipFile(z, 'r') as zf:
-                    zf.extractall(folder)
-            except Exception as e:
-                print(f"[MV] Error extracting {z}: {e}")
-                
+    # the ZIPs also carry Flurstueck/Nutzung/KatasterBezirk layers 02 never reads
+    unpack_new_zips(directory, "MV", keep=lambda n: os.path.basename(n).startswith("GebaeudeBauwerk."))
+
     results = []
     shps = glob.glob(os.path.join(directory, "**", "*GebaeudeBauwerk.shp"), recursive=True)
     
@@ -1526,10 +1533,17 @@ def main():
         ("MV", DIR_MV, process_mv),
     ]
 
+    failed = []
     for state_name, state_dir, process_func in states_to_process:
         if args.state and args.state.upper() != state_name.upper():
             continue
-        process_state(state_name, state_dir, process_func)
+        try:
+            process_state(state_name, state_dir, process_func)
+        except Exception as e:
+            # alkis.parquet of this state stays as it was
+            print(f"[{state_name}] FAILED, nothing written: {e}")
+            failed.append(state_name)
+    return 1 if failed else 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

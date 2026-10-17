@@ -132,8 +132,8 @@ SOURCES = {
     },
     "rlp": {
         "automated": True, "source_type": "direct_zip",
-        "probe": "http_last_modified", "url": _RLP_ZIP_URL, "verify": False,
-        "download": {"method": "direct_zip", "url": _RLP_ZIP_URL, "verify": False},
+        "probe": "http_last_modified", "url": _RLP_ZIP_URL,
+        "download": {"method": "direct_zip", "url": _RLP_ZIP_URL},
     },
     "st": {
         # The GBIS_Gebaeude.zip is rebuilt nightly, so its Last-Modified is

@@ -1,124 +1,95 @@
+"""
+Download the MV ALKIS shapefile ZIPs (one per Gemeinde) into data/mv/alkis/.
+
+The download service gives no size, date or ETag, so a refresh downloads every
+Gemeinde (~1 GB) into data/mv/alkis.new/ and swaps it in only when all of them
+succeeded; ZIPs of Gemeinden no longer listed (mergers) disappear with the old
+directory. 02 unpacks the new ZIPs. --missing-only just fills in Gemeinden that
+have no ZIP yet.
+
+The Gemeinden come from data/mv/Gemeinde_Gemarkung_Kreis.csv (historical ones
+skipped); file names keep the URL-encoded form 02 and earlier downloads use.
+
+Usage:
+    python scripts/01_download_alkis_mv.py                  # full refresh
+    python scripts/01_download_alkis_mv.py --missing-only
+"""
+
 import os
 import sys
-import requests
-import tqdm
 import csv
+import shutil
+import argparse
 import urllib.parse
-from concurrent.futures import ThreadPoolExecutor
 
-# Download URL pattern is loaded from scripts/alkis_sources.py.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import alkis_sources
+import alkis_download as dl
 
-# Configuration
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(BASE_DIR, "data")
+DATA_DIR = "data"
 ALKIS_DIR = os.path.join(DATA_DIR, "mv", "alkis")
+STAGING_DIR = ALKIS_DIR + ".new"
 CSV_FILE = os.path.join(DATA_DIR, "mv", "Gemeinde_Gemarkung_Kreis.csv")
 
-def generate_urls(csv_path):
-    urls = []
-    base_url = alkis_sources.download_url("mv")
-    
-    # Store unique municipalities to avoid duplicates
-    # Key: id_Gemeinde, Value: Gemeinde_Name (original)
-    municipalities = {}
 
-    if not os.path.exists(csv_path):
-        print(f"Error: {csv_path} not found.")
-        return []
+def gemeinde_items(csv_path):
+    """[{url, name}] per current Gemeinde, sorted by id."""
+    gemeinden = {}
+    with open(csv_path, encoding="utf-8") as f:
+        for row in csv.DictReader(f, delimiter=";"):
+            gid, name = row.get("id_Gemeinde"), row.get("Gemeinde_Name")
+            if gid and name and "hist." not in name:
+                gemeinden[gid] = name
+    pattern = alkis_sources.download_url("mv")
+    items = []
+    for gid in sorted(gemeinden):
+        transformed = gemeinden[gid]
+        for ch in ",./()- ":
+            transformed = transformed.replace(ch, "_")
+        url = pattern.format(id=gid, name=urllib.parse.quote(transformed))
+        items.append({"url": url, "name": url.split("file=")[-1].split("&")[0], "remote": {}})
+    return items
 
-    try:
-        with open(csv_path, 'r', encoding='utf-8') as f:
-            reader = csv.DictReader(f, delimiter=';')
-            
-            for row in reader:
-                id_gemeinde = row.get('id_Gemeinde')
-                gemeinde_name = row.get('Gemeinde_Name')
-                
-                if id_gemeinde and gemeinde_name:
-                    if 'hist.' in gemeinde_name:
-                        continue
-                    municipalities[id_gemeinde] = gemeinde_name
-                    
-    except Exception as e:
-        print(f"Error reading CSV: {e}")
-        return []
-
-    # Sort by ID
-    for id_gemeinde in sorted(municipalities.keys()):
-        original_name = municipalities[id_gemeinde]
-        
-        # Replace comma, dot, space etc. with underscore
-        transformed_name = original_name.replace(',', '_').replace('.', '_').replace('/', '_').replace('(', '_').replace(")", '_').replace(')', '_').replace('-', '_').replace(' ', '_')
-        
-        encoded_name = urllib.parse.quote(transformed_name)
-        
-        link = base_url.format(id=id_gemeinde, name=encoded_name)
-        urls.append(link)
-    
-    return urls
-
-def download_file(url, dest_path):
-    if os.path.exists(dest_path):
-        print(f"Skipping {os.path.basename(dest_path)}, already exists.")
-        return
-
-    try:
-        response = requests.get(url, stream=True)
-        response.raise_for_status()
-        total_size = int(response.headers.get('content-length', 0))
-        
-        with open(dest_path, 'wb') as f, tqdm.tqdm(
-            desc=os.path.basename(dest_path),
-            total=total_size,
-            unit='iB',
-            unit_scale=True,
-            unit_divisor=1024,
-        ) as bar:
-            for data in response.iter_content(chunk_size=1024):
-                size = f.write(data)
-                bar.update(size)
-    except Exception as e:
-        print(f"Error downloading {url}: {e}")
-        if os.path.exists(dest_path):
-            os.remove(dest_path)
 
 def main():
-    os.makedirs(ALKIS_DIR, exist_ok=True)
-    
-    print(f"Reading municipalities from {CSV_FILE}...")
-    urls = generate_urls(CSV_FILE)
-    
-    if not urls:
-        print("No URLs generated. Please check the CSV file.")
-        return
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--missing-only", action="store_true",
+                        help="only download Gemeinden without a ZIP in data/mv/alkis/")
+    args = parser.parse_args()
 
-    print(f"Generated {len(urls)} download links.")
-    
-    download_tasks = []
-    
-    for url in urls:
-        # Extract filename from URL
-        try:
-            if 'file=' in url:
-                filename_part = url.split('file=')[-1]
-                filename = filename_part.split('&')[0]
-                
-                dest_path = os.path.join(ALKIS_DIR, filename)
-                download_tasks.append((url, dest_path))
-            else:
-                print(f"Warning: Could not extract filename from {url}, skipping.")
-                continue
-            
-        except Exception as e:
-            print(f"Error parsing URL {url}: {e}")
+    items = gemeinde_items(CSV_FILE)
+    print(f"[MV] {len(items)} Gemeinden in {CSV_FILE}")
 
-    print(f"Starting download of {len(download_tasks)} files to {ALKIS_DIR}...")
-    
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        for url, path in download_tasks:
-            executor.submit(download_file, url, path)
+    if args.missing_only:
+        os.makedirs(ALKIS_DIR, exist_ok=True)
+        items = [i for i in items if not os.path.exists(os.path.join(ALKIS_DIR, i["name"]))]
+        print(f"[MV] {len(items)} without a ZIP")
+        downloaded, failed = dl.fetch_many(items, ALKIS_DIR, dl.Manifest(ALKIS_DIR), force=True)
+        print(f"[MV] {len(downloaded)} downloaded, {len(failed)} failed")
+        return 1 if failed else 0
+
+    shutil.rmtree(STAGING_DIR, ignore_errors=True)
+    os.makedirs(STAGING_DIR)
+    manifest = dl.Manifest(STAGING_DIR)
+    downloaded, failed = dl.fetch_many(items, STAGING_DIR, manifest, force=True)
+    manifest.save()
+    if failed:
+        print(f"[MV] {len(failed)} of {len(items)} failed, keeping the previous data; "
+              f"partial download left in {STAGING_DIR}:")
+        for name, err in sorted(failed.items()):
+            print(f"  {name}: {err}")
+        return 1
+
+    old = ALKIS_DIR + ".old"
+    shutil.rmtree(old, ignore_errors=True)
+    if os.path.isdir(ALKIS_DIR):
+        os.rename(ALKIS_DIR, old)
+    os.rename(STAGING_DIR, ALKIS_DIR)
+    shutil.rmtree(old, ignore_errors=True)
+    print(f"[MV] {len(downloaded)} Gemeinden downloaded to {ALKIS_DIR}. "
+          "Next: python scripts/02_extract_alkis.py --state MV")
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
