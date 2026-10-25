@@ -1,5 +1,6 @@
 import geopandas as gpd
 import pandas as pd
+import shapely
 from shapely.geometry import Point
 import os
 import json
@@ -92,16 +93,31 @@ def apply_corrections(alkis_df, corrections_file, state):
         
     count = 0
 
-    # Pre-compute indices for fast lookups
-    alkis_id_series = None
-    if any("alkis_id" in c or "reference_alkis_id" in c for c in corrections):
-        alkis_id_series = pd.Series(alkis_df.index, index=alkis_df['alkis_id'])
+    # Lookup tables with row positions. The batch updates below are label-based,
+    # so every match goes through alkis_df.index[...] first: positions and labels
+    # only coincide while the frame carries a RangeIndex, which it does not after
+    # the --district filter.
+    #
+    # alkis_id is not unique: a few addresses occur twice in the ALKIS data, as
+    # two points with the same street and housenumber, so each id maps to a list
+    # of positions. Only ids the corrections refer to are indexed.
+    alkis_id_positions = {}
+    wanted_ids = {c[k] for c in corrections for k in ("alkis_id", "reference_alkis_id") if k in c}
+    if wanted_ids:
+        all_ids = alkis_df['alkis_id'].to_numpy()
+        for pos in np.flatnonzero(alkis_df['alkis_id'].isin(wanted_ids).to_numpy()):
+            alkis_id_positions.setdefault(all_ids[pos], []).append(pos)
 
     street_indices = None
     unique_streets = None
+    district_values = housenumber_values = geometry_values = None
     if any(c.get("from_street") or c.get("replace_in_street") for c in corrections):
         street_indices = alkis_df.groupby('street').indices
         unique_streets = pd.Series(list(street_indices.keys()))
+        # Column arrays, addressed by the positions in street_indices.
+        district_values = alkis_df['district'].to_numpy() if 'district' in alkis_df.columns else None
+        housenumber_values = alkis_df['housenumber'].to_numpy()
+        geometry_values = alkis_df.geometry.to_numpy()
 
     # Track updates to avoid memory fragmentation from repeated .loc assignments
     update_orig_street = {}
@@ -125,63 +141,40 @@ def apply_corrections(alkis_df, corrections_file, state):
         # 1. ID-based correction
         if "alkis_id" in corr:
             a_id = corr["alkis_id"]
-            if a_id in alkis_id_series:
-                res = alkis_id_series[a_id]
-                target_indices = res.tolist() if isinstance(res, pd.Series) else [res]
-                
+            if a_id in alkis_id_positions:
+                target_indices = alkis_df.index[alkis_id_positions[a_id]].tolist()
+
         # 2. from_street correction
         elif from_street:
             if from_street in street_indices:
                 base_idx = street_indices[from_street]
-                if "city" in corr or "from_housenumber" in corr or "reference_alkis_id" in corr:
-                    subset = alkis_df.iloc[base_idx]
-                    mask = pd.Series(True, index=subset.index)
-                    if "city" in corr and 'district' in subset.columns:
-                        mask &= (subset['district'] == corr["city"])
-                    if "from_housenumber" in corr:
-                        mask &= (subset['housenumber'] == corr["from_housenumber"])
-
-                    if "reference_alkis_id" in corr:
-                        ref_id = corr["reference_alkis_id"]
-                        if alkis_id_series is not None and ref_id in alkis_id_series:
-                            r_res = alkis_id_series[ref_id]
-                            ref_idx = r_res.iloc[0] if isinstance(r_res, pd.Series) else r_res
-                            ref_geom = alkis_df.at[ref_idx, 'geometry']
-                            candidates = subset.loc[mask]
-                            max_dist = corr.get("max_distance", 2000)
-                            if candidates.crs and candidates.crs.is_geographic:
-                                dists = candidates.geometry.distance(ref_geom)
-                                mask &= (dists < (max_dist / 111320))
-                            else:
-                                dists = candidates.geometry.distance(ref_geom)
-                                mask &= (dists <= max_dist)
+                mask = np.ones(len(base_idx), dtype=bool)
+                if "city" in corr and district_values is not None:
+                    mask &= (district_values[base_idx] == corr["city"])
+                if "from_housenumber" in corr:
+                    mask &= (housenumber_values[base_idx] == corr["from_housenumber"])
+                if "reference_alkis_id" in corr:
+                    ref_id = corr["reference_alkis_id"]
+                    if ref_id in alkis_id_positions:
+                        ref_geom = geometry_values[alkis_id_positions[ref_id][0]]
+                        max_dist = corr.get("max_distance", 2000)
+                        dists = shapely.distance(geometry_values[base_idx], ref_geom)
+                        if alkis_df.crs and alkis_df.crs.is_geographic:
+                            mask &= (dists < (max_dist / 111320))
                         else:
-                            mask &= False
-
-                    target_indices = subset.index[mask].tolist()
-                else:
-                    # groupby().indices yields positional indices; the updates
-                    # below are label-based, and the two only coincide while the
-                    # frame carries a RangeIndex (not the case after the
-                    # --district filter).
-                    target_indices = alkis_df.index[base_idx].tolist()
+                            mask &= (dists <= max_dist)
+                    else:
+                        mask &= False
+                target_indices = alkis_df.index[base_idx[mask]].tolist()
 
         # 3. replace_in_street correction
         elif replace_in_street:
             match_mask = unique_streets.astype(str).str.contains(replace_in_street, regex=False)
             if match_mask.any():
-                matched_strs = unique_streets[match_mask].tolist()
-                base_idx = []
-                for ms in matched_strs:
-                    base_idx.extend(street_indices[ms])
-
-                if base_idx:
-                    if "city" in corr and 'district' in alkis_df.columns:
-                        subset = alkis_df.iloc[base_idx]
-                        mask = (subset['district'] == corr["city"])
-                        target_indices = subset.index[mask].tolist()
-                    else:
-                        target_indices = alkis_df.index[base_idx].tolist()
+                base_idx = np.concatenate([street_indices[s] for s in unique_streets[match_mask]])
+                if "city" in corr and district_values is not None:
+                    base_idx = base_idx[district_values[base_idx] == corr["city"]]
+                target_indices = alkis_df.index[base_idx].tolist()
 
         if not target_indices:
             continue
