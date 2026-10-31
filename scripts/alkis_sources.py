@@ -13,8 +13,9 @@ Probe strategies (the `probe` field):
   nds_metadata        GET the metadata GeoJSON, take max of the aktualitaet field
   hh_ckan             search the transparenz.hamburg.de CKAN for the current ALKIS
                       Adressen dataset, newest YYYY-MM-DD in its ZIP file names
-  mv_atom             GET the GeoPortal.MV update Atom feed, newest <updated> among
-                      the ALKIS entries (MV publishes per-Kreis, updated continuously)
+  mv_zip_header       stream the first bytes of a few Gemeinde ZIPs from the MV
+                      download service and read the member date of the first local
+                      file header (the date the service built the ZIP)
   sn_changelog        GET the geodaten.sachsen.de Atom changelog, newest entry whose
                       title mentions HK (Hauskoordinaten — the address product)
   he_downloadcenter   GET the JSON behind the HVBG Downloadcenter page, Ausgabe
@@ -32,6 +33,7 @@ yet carry a date once downloaded (handled post-download by detect_alkis_date in
 
 import re
 import json
+import struct
 import datetime
 import xml.etree.ElementTree as ET
 from urllib.parse import quote
@@ -67,6 +69,10 @@ _HH_CKAN_URL = ("https://suche.transparenz.hamburg.de/api/3/action/package_searc
 _MV_ATOM_URL = "https://www.geoportal-mv.de/portal/Geodatenviewer/Datenaktualisierungen/Atom"
 _MV_DOWNLOAD_PATTERN = ("https://www.geodaten-mv.de/dienste/alkis_nas_download?index=1&"
                         "dataset=32538df8-6b74-4582-8591-c77e85fbf929&file={id}_SHP_{name}.zip")
+_MV_PROBE_URLS = [
+    _MV_DOWNLOAD_PATTERN.format(id="13004000", name="Schwerin__Landeshauptstadt"),
+    _MV_DOWNLOAD_PATTERN.format(id="13003000", name="Rostock__Hanse__und_Universit%C3%A4tsstadt"),
+]
 _SN_CHANGELOG_URL = "https://www.geodaten.sachsen.de/changelog.xml"
 _SN_ZIP_URL = ("https://geocloud.landesvermessung.sachsen.de/public.php/dav/files/"
                "B3HnXbDDgAkw69a/hk_sn_ascii.zip")
@@ -148,9 +154,9 @@ SOURCES = {
     },
     "mv": {
         "automated": True, "source_type": "download_service",
-        "probe": "mv_atom", "url": _MV_ATOM_URL,
+        "probe": "mv_zip_header", "url": _MV_ATOM_URL, "probe_urls": _MV_PROBE_URLS,
         "download": {"method": "nas_download_service", "url": _MV_DOWNLOAD_PATTERN},
-        "note": "Fortlaufend je Landkreis aktualisiert",
+        "note": "Shape-ZIPs des Downloaddienstes, monatlich neu gebaut",
     },
     "hh": {
         "automated": True, "source_type": "portal",
@@ -218,7 +224,7 @@ PROBE_LABELS = {
     "nrw_index": "opengeodata-Index (timestamp)",
     "nds_metadata": "GeoJSON-Metadaten",
     "hh_ckan": "Transparenzportal (CKAN)",
-    "mv_atom": "GeoPortal.MV Atom-Feed",
+    "mv_zip_header": "Downloaddienst (ZIP-Datum)",
     "sn_changelog": "changelog.xml (HK/HU)",
     "wfs_field": "WFS (datum_auswertung)",
     "he_downloadcenter": "Downloadcenter (Ausgabe)",
@@ -324,27 +330,35 @@ def _hh_ckan_date(session=None, timeout=60):
     return latest["date"] if latest else None
 
 
-def _mv_atom_date(url, session=None, timeout=60):
+def _zip_first_member_date(url, session, timeout):
     """
-    Newest <updated> among MV's per-Landkreis ALKIS *address-data* entries in the
-    GeoPortal.MV Atom feed ("ALKIS / <Kreisname>"). Excludes the catalog/schema
-    ("ALKIS / Katalog-Download", "Katalogdaten") and topographic ("Topographie")
-    entries, which update on their own cadence and would otherwise overstate the
-    address-data stand.
+    Date of the first member of the ZIP at `url`, read from its local file
+    header (bytes 0-29) of a streamed GET that is closed right after. None when
+    the response does not start with a ZIP local file header.
+    """
+    with session.get(url, stream=True, timeout=timeout) as resp:
+        resp.raise_for_status()
+        head = b""
+        for chunk in resp.iter_content(chunk_size=64):
+            head += chunk
+            if len(head) >= 30:
+                break
+    if len(head) < 30 or head[:4] != b"PK\x03\x04":
+        return None
+    dos_date = struct.unpack("<H", head[12:14])[0]
+    return datetime.date(1980 + (dos_date >> 9), (dos_date >> 5) & 15, dos_date & 31).isoformat()
+
+
+def _mv_zip_header_date(urls, session=None, timeout=60):
+    """
+    Newest build date among the MV Gemeinde ZIPs at `urls`: the date 02 records
+    for the local files (newest ZIP member date). The service sends neither
+    Last-Modified nor Range support, so the date comes from the ZIP itself.
+    The GeoPortal.MV Atom feed is no substitute: its "Stand" is the daily update
+    of the cadastre database, not of the shapefile ZIPs.
     """
     session = session or requests.Session()
-    resp = session.get(url, timeout=timeout)
-    resp.raise_for_status()
-    text = resp.content.decode("utf-8", "replace")
-    dates = []
-    for entry in re.findall(r"<entry>(.*?)</entry>", text, re.S):
-        title = re.search(r"<title>(.*?)</title>", entry, re.S)
-        updated = re.search(r"<updated>(\d{4}-\d{2}-\d{2})", entry)
-        if not (title and updated):
-            continue
-        t = title.group(1)
-        if re.search(r"ALKIS", t, re.I) and not re.search(r"Katalog|Topographie", t, re.I):
-            dates.append(updated.group(1))
+    dates = [d for d in (_zip_first_member_date(u, session, timeout) for u in urls) if d]
     return max(dates) if dates else None
 
 
@@ -503,8 +517,8 @@ def probe_remote_date(state, session=None):
             return _nds_metadata_date(src["url"], session=session), note
         if probe == "hh_ckan":
             return _hh_ckan_date(session=session), note
-        if probe == "mv_atom":
-            return _mv_atom_date(src["url"], session=session), note
+        if probe == "mv_zip_header":
+            return _mv_zip_header_date(src["probe_urls"], session=session), note
         if probe == "sn_changelog":
             return _sn_changelog_date(src["url"], session=session), note
         if probe == "he_downloadcenter":
