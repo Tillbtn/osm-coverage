@@ -23,6 +23,10 @@ Probe strategies (the `probe` field):
   lgb_gazetteer       GET one feature of the LGB gazetteer (OGC API Features) for the
                       state's landschluessel and read its 'akt' date; the gazetteer
                       carries the Hauskoordinaten of Brandenburg and Berlin
+
+A source with `release_months` publishes the product we ingest only at the end of
+those months, while its probe tracks a more frequent upstream update; the probed
+date is rounded down to the last such release (e.g. 2026-10-30 -> 2026-09-30).
   none                no cheap remote probe (manual portal / order process)
 
 `automated` reflects whether 01 can fetch the data unattended; a source can be
@@ -179,10 +183,11 @@ SOURCES = {
         # The gazetteer carries the same addresses as the Geobroker product but
         # lagging street names; 01_download_alkis_bb.py fetches it only as a
         # fallback. Its 'akt' is the stand of the Geobroker 'aud' column; the
-        # gazetteer metadata promise monthly updates, the Geobroker product
-        # half-yearly ones.
+        # gazetteer is updated monthly, the Geobroker product only with the
+        # stands 31.03. and 30.09. (its 'aud' then reads e.g. 2026-03-31).
         "automated": False, "source_type": "order",
         "probe": "lgb_gazetteer", "url": _LGB_GAZETTEER_URL, "landschluessel": "12",
+        "release_months": (3, 9),
         "download": {"method": "manual", "url": "https://geobroker.geobasis-bb.de"},
         "note": "Halbjährlich (Stand 31.03./30.09.); Bestellung über Geobroker",
     },
@@ -459,6 +464,22 @@ def _lgb_gazetteer_date(url, landschluessel, session=None, timeout=60):
     return str(akt)[:10] if akt else None
 
 
+def latest_release(date, months):
+    """
+    Last day of the newest month in `months` that is not after `date`'s month,
+    as 'YYYY-MM-DD' ('2026-10-30', (3, 9) -> '2026-09-30'; '2027-01-31' ->
+    '2026-09-30'). An upstream date inside a release month counts as that release.
+    """
+    d = datetime.date.fromisoformat(date[:10])
+    year = d.year
+    past = [m for m in months if m <= d.month]
+    if not past:
+        year, past = year - 1, list(months)
+    month = max(past)
+    nxt = datetime.date(year + (month == 12), month % 12 + 1, 1)
+    return (nxt - datetime.timedelta(days=1)).isoformat()
+
+
 def probe_wfs_date(sub, session=None, timeout=60):
     """
     Cheaply read a WFS sub-source's date_field by fetching a single feature (the
@@ -509,23 +530,30 @@ def probe_remote_date(state, session=None):
         return None, note
 
     try:
-        if probe == "http_last_modified":
-            return _last_modified_date(src["url"], verify=src.get("verify", True), session=session), note
-        if probe == "nrw_index":
-            return _nrw_index_date(src["url"], session=session), note
-        if probe == "nds_metadata":
-            return _nds_metadata_date(src["url"], session=session), note
-        if probe == "hh_ckan":
-            return _hh_ckan_date(session=session), note
-        if probe == "mv_zip_header":
-            return _mv_zip_header_date(src["probe_urls"], session=session), note
-        if probe == "sn_changelog":
-            return _sn_changelog_date(src["url"], session=session), note
-        if probe == "he_downloadcenter":
-            return _he_downloadcenter_date(session=session), note
-        if probe == "lgb_gazetteer":
-            return _lgb_gazetteer_date(src["url"], src["landschluessel"], session=session), note
+        date = _probe_date(src, probe, session)
     except Exception as e:
         return None, f"Fernabruf fehlgeschlagen: {e}"
+    if date and src.get("release_months"):
+        date = latest_release(date, src["release_months"])
+    return date, note
 
-    return None, note
+
+def _probe_date(src, probe, session):
+    """Raw upstream date of one probe strategy, or None for an unknown strategy."""
+    if probe == "http_last_modified":
+        return _last_modified_date(src["url"], verify=src.get("verify", True), session=session)
+    if probe == "nrw_index":
+        return _nrw_index_date(src["url"], session=session)
+    if probe == "nds_metadata":
+        return _nds_metadata_date(src["url"], session=session)
+    if probe == "hh_ckan":
+        return _hh_ckan_date(session=session)
+    if probe == "mv_zip_header":
+        return _mv_zip_header_date(src["probe_urls"], session=session)
+    if probe == "sn_changelog":
+        return _sn_changelog_date(src["url"], session=session)
+    if probe == "he_downloadcenter":
+        return _he_downloadcenter_date(session=session)
+    if probe == "lgb_gazetteer":
+        return _lgb_gazetteer_date(src["url"], src["landschluessel"], session=session)
+    return None

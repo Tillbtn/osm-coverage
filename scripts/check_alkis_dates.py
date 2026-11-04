@@ -203,6 +203,14 @@ def is_newer(remote, processed):
     return r[:n] > p[:n]
 
 
+def remote_source_label(src):
+    """Origin of the remote date; notes when it was rounded to a release stand."""
+    label = probe_label(src.get("probe"))
+    if label and src.get("release_months"):
+        label += ", auf Ausgabestand abgerundet"
+    return label
+
+
 def build(states, verbose=False):
     session = requests.Session()
     out = {}
@@ -228,7 +236,7 @@ def build(states, verbose=False):
             "source_url": src.get("url"),
             **processed_fields(compared, extracted, extracted_at, extracted_src),
             "remote_date": remote_date,
-            "remote_source": probe_label(src.get("probe")),
+            "remote_source": remote_source_label(src),
             "osm_date": osm_date,
             "compared_at": compared_at,
             "update_available": update,
