@@ -1,8 +1,10 @@
 """Update gate for run_updates.sh.
 
 Exit 0 if Geofabrik has a newer export than the last processed one for at least
-one state, else 1. Reads the internal server's pages first when a login cookie
-is available (published earlier), otherwise the public ones.
+one state, else 1. The export date is the timestamp in the extract's replication
+state file (updates/state.txt), the same value 04 reads from the PBF header
+(osmosis_replication_timestamp). The internal server is asked first when a login
+cookie is available (it publishes earlier), otherwise the public one.
 """
 
 import requests
@@ -20,61 +22,65 @@ import notify
 # Configuration matches 03_import_osm.py
 STATES = {
     "nds": {
-        "url": "https://download.geofabrik.de/europe/germany/niedersachsen.html",
+        "url": "https://download.geofabrik.de/europe/germany/niedersachsen/updates/state.txt",
         "history_file": os.path.join("site", "public", "states", "nds", "nds_history.json")
     },
     "nrw": {
-        "url": "https://download.geofabrik.de/europe/germany/nordrhein-westfalen.html",
+        "url": "https://download.geofabrik.de/europe/germany/nordrhein-westfalen/updates/state.txt",
         "history_file": os.path.join("site", "public", "states", "nrw", "nrw_history.json")
     },
     "rlp": {
-        "url": "https://download.geofabrik.de/europe/germany/rheinland-pfalz.html",
+        "url": "https://download.geofabrik.de/europe/germany/rheinland-pfalz/updates/state.txt",
         "history_file": os.path.join("site", "public", "states", "rlp", "rlp_history.json")
     },
     "bb": {
-        "url": "https://download.geofabrik.de/europe/germany/brandenburg.html",
+        "url": "https://download.geofabrik.de/europe/germany/brandenburg/updates/state.txt",
         "history_file": os.path.join("site", "public", "states", "bb", "bb_history.json")
     },
     "hh": {
-        "url": "https://download.geofabrik.de/europe/germany/hamburg.html",
+        "url": "https://download.geofabrik.de/europe/germany/hamburg/updates/state.txt",
         "history_file": os.path.join("site", "public", "states", "hh", "hh_history.json")
     },
     "he": {
-        "url": "https://download.geofabrik.de/europe/germany/hessen.html",
+        "url": "https://download.geofabrik.de/europe/germany/hessen/updates/state.txt",
         "history_file": os.path.join("site", "public", "states", "he", "he_history.json")
     },
     "st": {
-        "url": "https://download.geofabrik.de/europe/germany/sachsen-anhalt.html",
+        "url": "https://download.geofabrik.de/europe/germany/sachsen-anhalt/updates/state.txt",
         "history_file": os.path.join("site", "public", "states", "st", "st_history.json")
     },
     "sn": {
-        "url": "https://download.geofabrik.de/europe/germany/sachsen.html",
+        "url": "https://download.geofabrik.de/europe/germany/sachsen/updates/state.txt",
         "history_file": os.path.join("site", "public", "states", "sn", "sn_history.json")
     },
     "be": {
-        "url": "https://download.geofabrik.de/europe/germany/berlin.html",
+        "url": "https://download.geofabrik.de/europe/germany/berlin/updates/state.txt",
         "history_file": os.path.join("site", "public", "states", "be", "be_history.json")
     },
     "mv": {
-        "url": "https://download.geofabrik.de/europe/germany/mecklenburg-vorpommern.html",
+        "url": "https://download.geofabrik.de/europe/germany/mecklenburg-vorpommern/updates/state.txt",
         "history_file": os.path.join("site", "public", "states", "mv", "mv_history.json")
     }
 }
 
-def scrape_date(session, url):
-    """Fetches the Geofabrik page and extracts the timestamp.
+# Replication state files escape the colons: "timestamp=2026-11-21T21\:20\:51Z"
+STATE_TIMESTAMP = re.compile(r"^timestamp=(\d{4}-\d{2}-\d{2}T[\d:\\]+Z)\s*$", re.MULTILINE)
 
-    Returns None if the page carries no timestamp.
+
+def read_state_date(session, url):
+    """Fetches a replication state.txt and returns its timestamp in local time.
+
+    Returns None if the response carries no timestamp (e.g. an HTML login page).
     """
     response = session.get(url, timeout=10)
     response.raise_for_status()
 
-    # Regex to find: "contains all OSM data up to 2025-12-14T21:21:45Z"
-    match = re.search(r"contains all OSM data up to ([\d-]{10}T[\d:]{8}Z)", response.text)
+    match = STATE_TIMESTAMP.search(response.text)
     if not match:
         return None
 
-    dt = datetime.strptime(match.group(1), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=zoneinfo.ZoneInfo("UTC"))
+    stamp = match.group(1).replace("\\", "")
+    dt = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=zoneinfo.ZoneInfo("UTC"))
     return dt.astimezone(zoneinfo.ZoneInfo("Europe/Berlin")).strftime("%Y-%m-%dT%H:%M:%S")
 
 
@@ -86,20 +92,20 @@ def open_internal_session(force_refresh=False):
 
 
 def read_internal_page(session, url):
-    """(date, problem, cookie_rejected) for one page on the internal server."""
+    """(date, problem, cookie_rejected) for one state file on the internal server."""
     try:
-        date = scrape_date(session, url)
+        date = read_state_date(session, url)
     except requests.HTTPError as e:
         code = e.response.status_code if e.response is not None else None
         # 401/403 points at the cookie. A 5xx says nothing about the login and
         # must not trigger one.
-        return None, f"internal page answered HTTP {code}", code in (401, 403)
+        return None, f"internal state file answered HTTP {code}", code in (401, 403)
     except Exception as e:
-        return None, f"error fetching the internal page: {e}", False
+        return None, f"error fetching the internal state file: {e}", False
     if date:
         return date, None, False
     # An expired cookie is answered with the OSM login page: HTTP 200, no date.
-    return None, "no timestamp on the internal page (login not accepted?)", True
+    return None, "no timestamp in the internal state file (login not accepted?)", True
 
 
 def get_remote_date(public_url, public_session, internal):
@@ -108,7 +114,7 @@ def get_remote_date(public_url, public_session, internal):
     'internal' holds the shared internal session ({"session": ...}). A rejected
     cookie triggers one fresh login, which the remaining states reuse; if the
     renewed cookie is rejected too, the run gives up on the internal server. A
-    server error sends only this state to the public pages, is logged once per
+    server error sends only this state to the public server, is logged once per
     run, and the next state tries the internal server again.
     """
     for attempt in (1, 2):  # the second attempt runs with a renewed cookie
@@ -132,12 +138,12 @@ def get_remote_date(public_url, public_session, internal):
         break
 
     try:
-        date = scrape_date(public_session, public_url)
+        date = read_state_date(public_session, public_url)
         if date is None:
-            print(f"[{public_url}] Error: Could not find timestamp pattern.")
+            print(f"[{public_url}] Error: no timestamp in the state file.")
         return date, "public"
     except Exception as e:
-        print(f"[{public_url}] Error fetching Geofabrik page: {e}")
+        print(f"[{public_url}] Error fetching the Geofabrik state file: {e}")
         return None, "public"
 
 def get_local_date(history_path):
@@ -175,7 +181,7 @@ def main():
             if not remote_date:
                 print(f"[{state_key}] Warning: Could not fetch remote date. Skipping check.")
                 notify.track_failure(f"gate:{state_key}",
-                                     "No export date on the internal or the public Geofabrik page.",
+                                     "No export date in the internal or the public Geofabrik state file.",
                                      threshold=3, priority="default",
                                      title=f"Geofabrik-Exportdatum {state_key.upper()} nicht lesbar")
                 continue
